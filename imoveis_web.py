@@ -1,6 +1,6 @@
 import sqlite3
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import os
 import re
 import pytesseract
@@ -286,7 +286,7 @@ def parse_contribuinte(text: str) -> list:
 def save_dict_to_db_web(data: dict, tiff_path: str | None = None, ocr_text: str = "") -> int:
     conn = get_conn()
     cur = conn.cursor()
-    now = (datetime.utcnow() - timedelta(hours=4)).isoformat()
+    now = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=4)).isoformat()
     cur.execute(
         """
         INSERT INTO imoveis (
@@ -463,7 +463,7 @@ def set_lock(imovel_id: int, user: str = "Web"):
     """Marca registro como 'em edição'."""
     conn = get_conn()
     cur = conn.cursor()
-    now = (datetime.utcnow() - timedelta(hours=4)).isoformat()
+    now = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=4)).isoformat()
     cur.execute(
         """
         INSERT INTO imoveis_lock (imovel_id, editing_by, editing_since)
@@ -530,7 +530,7 @@ def inject_notifications():
     try:
         conn = get_conn()
         cur = conn.cursor()
-        limit_time = (datetime.utcnow() - timedelta(minutes=5)).isoformat()
+        limit_time = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=5)).isoformat()
         cur.execute("SELECT username, role, last_seen FROM users WHERE last_seen > ? ORDER BY last_seen DESC", (limit_time,))
         online_users = [dict(row) for row in cur.fetchall()]
         conn.close()
@@ -542,7 +542,7 @@ def inject_notifications():
 @app.before_request
 def update_last_seen():
     if current_user.is_authenticated:
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
         try:
             conn = get_conn()
             cur = conn.cursor()
@@ -642,7 +642,7 @@ def recuperar_senha():
         # Check if user exists (optional, maybe security risk to reveal? but requested flow implies it)
         # Requirement: "preenche nome e login para solicitar"
         
-        now = (datetime.utcnow() - timedelta(hours=4)).isoformat()
+        now = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=4)).isoformat()
         cur.execute("INSERT INTO password_resets (username, name, status, created_at) VALUES (?, ?, 'PENDENTE', ?)",
                     (username, name, now))
         conn.commit()
@@ -1177,7 +1177,7 @@ def concluir_imovel(imovel_id):
     for k, v in campos.items():
         sets.append(f"{k}=?")
         vals.append(v)
-    vals.append((datetime.utcnow() - timedelta(hours=4)).isoformat())
+    vals.append((datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=4)).isoformat())
     vals.append(imovel_id)
     
     # Update data + status + concluded_by
@@ -1476,7 +1476,7 @@ def editar_imovel(imovel_id):
         for k, v in campos.items():
             sets.append(f"{k}=?")
             vals.append(v)
-        vals.append((datetime.utcnow() - timedelta(hours=4)).isoformat())
+        vals.append((datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=4)).isoformat())
         vals.append(imovel_id)
         sql = f"UPDATE imoveis SET {', '.join(sets)}, updated_at=? WHERE id=?"
         cur.execute(sql, vals)

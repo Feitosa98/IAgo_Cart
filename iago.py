@@ -32,7 +32,7 @@ def clean_text_for_regex(text):
     return re.escape(text)
 
 def generate_context_regex(full_text, value, context_words=3):
-    """
+    r"""
     Finds 'value' in 'full_text' and generates a regex based on preceding words.
     Example: "Matrícula número 12345" -> value="12345"
     Context: "Matrícula número"
@@ -92,7 +92,7 @@ def generate_context_regex(full_text, value, context_words=3):
     
     # Final Regex
     # Case insensitive flag (?i) at start
-    full_regex = f"(?i){context_regex}\\s*[:.\-]?\\s*{capture_group}"
+    full_regex = rf"(?i){context_regex}\s*[:.\-]?\s*{capture_group}"
     
     return full_regex
 

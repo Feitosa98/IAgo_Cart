@@ -2,10 +2,12 @@
 __pycache__/
 *.py[cod]
 *$py.class
+venv/
 
 # Database
 *.db
 *.sqlite3
+!clean.db.template
 
 # Secrets
 *.pem
@@ -17,9 +19,11 @@ backups/
 versoes/
 Vwercoes/
 *.bak
+*.zip
 
 # User Content
 uploads/
+*.log
 
 # OS specific
 Thumbs.db
