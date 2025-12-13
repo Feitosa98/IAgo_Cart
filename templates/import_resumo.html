@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block conteudo %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card shadow rounded-3">
+            <div class="card-header bg-success text-white">
+                <h4 class="mb-0 fw-bold"><i class="bi bi-check-circle-fill"></i> Resumo da Importação</h4>
+            </div>
+            <div class="card-body p-4">
+                <h5 class="mb-3">
+                    Foram processados <strong>{{ total_files }}</strong> arquivos.
+                </h5>
+                <p>
+                    <span class="text-success fw-bold">{{ success_count }} Sucessos</span> |
+                    <span class="text-danger fw-bold">{{ error_count }} Falhas</span>
+                </p>
+
+                <div class="table-responsive mt-4">
+                    <table class="table table-bordered table-striped">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Arquivo</th>
+                                <th>Status</th>
+                                <th>Matrícula Extraída</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in details %}
+                            <tr>
+                                <td>{{ item.filename }}</td>
+                                <td>
+                                    {% if item.success %}
+                                    <span class="badge bg-success">Importado</span>
+                                    {% else %}
+                                    <span class="badge bg-danger">Erro</span>
+                                    <small class="d-block text-muted">{{ item.error }}</small>
+                                    {% endif %}
+                                </td>
+                                <td>{{ item.matricula or '-' }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="d-grid gap-2 mt-4">
+                    <a href="{{ url_for('importar_arquivo') }}" class="btn btn-outline-primary">Nova Importação</a>
+                    <a href="{{ url_for('index') }}" class="btn btn-primary">Voltar para Início</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

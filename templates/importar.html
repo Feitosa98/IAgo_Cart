@@ -1,0 +1,238 @@
+{% extends "base.html" %}
+
+{% block conteudo %}
+<div class="row justify-content-center">
+    <div class="col-md-9 col-lg-7">
+        <div class="card shadow rounded-3">
+            <div class="card-header bg-white border-bottom-0 pt-4 pb-0">
+                <h3 class="card-title fw-bold text-secondary text-center">Importar Matrícula</h3>
+            </div>
+            <div class="card-body p-4">
+                <div class="alert alert-info mb-4">
+                    <i class="bi bi-info-circle"></i> Envie arquivos TIFF/PDF/IMG. O sistema processará um por um.
+                </div>
+
+                <form id="importForm" onsubmit="return false;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="mb-4">
+                        <label for="arquivo" class="form-label fw-medium">Selecione arquivos</label>
+                        <input class="form-control" type="file" id="arquivo" name="arquivo"
+                            accept=".tif,.tiff,.png,.jpg,.jpeg,.pdf" required multiple>
+                    </div>
+
+                    <div class="d-grid gap-2">
+                        <button type="button" class="btn btn-primary btn-lg" id="btnImportar" onclick="startImport()">
+                            Iniciar Importação
+                        </button>
+                        <a href="{{ url_for('index') }}" class="btn btn-outline-secondary">Voltar</a>
+                    </div>
+                </form>
+
+                <!-- Progress Area -->
+                <div id="progressArea" class="mt-4" style="display: none;">
+                    <h5 class="text-center text-primary" id="progressText">Processando 0 de 0...</h5>
+                    <div class="progress mb-3">
+                        <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated"
+                            role="progressbar" style="width: 0%"></div>
+                    </div>
+                    <div id="currentFileText" class="text-center text-muted small"></div>
+                </div>
+
+                <!-- Results Table -->
+                <div id="resultsArea" class="mt-4" style="display: none;">
+                    <h5 class="fw-bold">Resumo</h5>
+                    <table class="table table-sm table-bordered">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Arquivo</th>
+                                <th>Status</th>
+                                <th>Matrícula</th>
+                                <th>Detalhes</th>
+                            </tr>
+                        </thead>
+                        <tbody id="resultsBody"></tbody>
+                    </table>
+                    <div class="d-grid">
+                        <a href="{{ url_for('index') }}" class="btn btn-success">Concluir / Voltar ao Início</a>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Duplicate -->
+<div class="modal fade" id="modalDuplicate" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-warning text-dark">
+                <h5 class="modal-title">Matrícula Duplicada</h5>
+            </div>
+            <div class="modal-body">
+                <p>A matrícula <strong id="dupMatricula"></strong> já existe no sistema.</p>
+                <p>Deseja substituir a existente pela nova?</p>
+                <p class="small text-muted">A matrícula antiga será removida e a nova assumirá o lugar.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="resolveDuplicate(false)">Não, pular</button>
+                <button type="button" class="btn btn-danger" onclick="resolveDuplicate(true)">Sim, substituir</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let filesQueue = [];
+    let totalFiles = 0;
+    let processedCount = 0;
+    let csrfToken = "{{ csrf_token() }}";
+
+    // Duplicate resolution implementation
+    let duplicateResolver = null;
+
+    function startImport() {
+        const input = document.getElementById('arquivo');
+        if (!input.files.length) {
+            alert("Selecione pelo menos um arquivo.");
+            return;
+        }
+
+        filesQueue = Array.from(input.files);
+        totalFiles = filesQueue.length;
+        processedCount = 0;
+
+        // UI Setup
+        document.getElementById('importForm').style.display = 'none';
+        document.getElementById('progressArea').style.display = 'block';
+        document.getElementById('resultsArea').style.display = 'block';
+        updateProgress();
+
+        processNext();
+    }
+
+    function updateProgress() {
+        const pct = Math.round((processedCount / totalFiles) * 100);
+        document.getElementById('progressBar').style.width = pct + "%";
+        document.getElementById('progressText').innerText = `Processando ${processedCount} de ${totalFiles}...`;
+    }
+
+    async function processNext() {
+        if (filesQueue.length === 0) {
+            document.getElementById('progressText').innerText = "Concluído!";
+            document.getElementById('progressBar').classList.remove('progress-bar-animated');
+            document.getElementById('progressBar').classList.add('bg-success');
+            return;
+        }
+
+        const file = filesQueue.shift(); // Get first
+        document.getElementById('currentFileText').innerText = `Atual: ${file.name}`;
+
+        try {
+            await uploadFile(file, false);
+        } catch (err) {
+            console.error(err);
+            addResult(file.name, "Erro", "-", err.message || "Erro desconhecido");
+        }
+
+        processedCount++;
+        updateProgress();
+
+        // Next
+        processNext();
+    }
+
+    function uploadFile(file, overwrite) {
+        return new Promise((resolve, reject) => {
+            const formData = new FormData();
+            formData.append('arquivo', file);
+            formData.append('csrf_token', csrfToken);
+            formData.append('mode', 'ajax');
+            if (overwrite) formData.append('overwrite', 'true');
+
+            fetch("{{ url_for('importar_arquivo') }}", {
+                method: 'POST',
+                body: formData
+            })
+                .then(async response => {
+                    const text = await response.text();
+                    try {
+                        const data = JSON.parse(text);
+                        if (!response.ok) {
+                            // If 403 or 500 but returned JSON error
+                            throw new Error(data.message || data.error || "Erro no servidor");
+                        }
+                        if (data.status === 'success') {
+                            addResult(file.name, "Sucesso", data.matricula, "Importado");
+                            resolve();
+                        } else if (data.status === 'duplicate') {
+                            // Trigger Modal
+                            showDuplicateModal(data.matricula, file).then(shouldOverwrite => {
+                                if (shouldOverwrite) {
+                                    // Recursive retry with overwrite
+                                    uploadFile(file, true).then(resolve).catch(reject);
+                                } else {
+                                    addResult(file.name, "Ignorado", data.matricula, "Duplicada mantida");
+                                    resolve();
+                                }
+                            });
+                        } else {
+                            addResult(file.name, "Erro", "-", data.message || "Erro desconhecido");
+                            resolve();
+                        }
+                    } catch (e) {
+                        console.error("JSON Parse Error:", e);
+                        console.error("Raw Response:", text);
+                        // Check if it's HTML (likely login or error page)
+                        if (text.trim().startsWith("<")) {
+                            addResult(file.name, "Erro", "-", "Sessão expirada ou erro. Recarregue a página.");
+                        } else {
+                            addResult(file.name, "Erro", "-", "Resposta inválida do servidor: " + text.substring(0, 50));
+                        }
+                        resolve();
+                    }
+                })
+                .catch(err => {
+                    reject(err);
+                });
+        });
+    }
+
+    function showDuplicateModal(matricula, file) {
+        return new Promise((resolve) => {
+            document.getElementById('dupMatricula').innerText = matricula;
+            // Show BS Modal
+            const myModal = new bootstrap.Modal(document.getElementById('modalDuplicate'));
+            myModal.show();
+
+            // Store confirm callback
+            duplicateResolver = (choice) => {
+                myModal.hide();
+                resolve(choice);
+            };
+        });
+    }
+
+    function resolveDuplicate(choice) {
+        if (duplicateResolver) duplicateResolver(choice);
+    }
+
+    function addResult(filename, status, matricula, details) {
+        const tbody = document.getElementById('resultsBody');
+        const tr = document.createElement('tr');
+
+        let badgeClass = "bg-secondary";
+        if (status === "Sucesso") badgeClass = "bg-success";
+        if (status === "Erro") badgeClass = "bg-danger";
+        if (status === "Ignorado") badgeClass = "bg-warning text-dark";
+
+        tr.innerHTML = `
+            <td>${filename}</td>
+            <td><span class="badge ${badgeClass}">${status}</span></td>
+            <td>${matricula || '-'}</td>
+            <td class="small">${details}</td>
+        `;
+        tbody.appendChild(tr);
+    }
+</script>
+{% endblock %}

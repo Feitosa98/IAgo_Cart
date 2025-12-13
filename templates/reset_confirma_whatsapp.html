@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block conteudo %}
+<div class="container mt-4 text-center">
+    <div class="row justify-content-center">
+        <div class="col-md-6">
+            <div class="card shadow border-success">
+                <div class="card-body py-5">
+                    <h2 class="text-success mb-4"><i class="bi bi-check-circle-fill"></i> Sucesso!</h2>
+                    <p class="lead">A senha do usuário <strong>{{ user['username'] }}</strong> foi resetada.</p>
+
+                    <div class="alert alert-secondary d-inline-block px-4 py-2 mt-2">
+                        <strong>Nova Senha Temporária:</strong><br>
+                        <span class="h3 user-select-all">{{ senha }}</span>
+                    </div>
+
+                    <hr class="my-4">
+
+                    <h5 class="mb-3">Enviar notificação via WhatsApp?</h5>
+
+                    {% if whatsapp %}
+                    {% set msg = "Olá, sua senha no sistema ONR foi resetada. Para o primeiro acesso, utilize a senha
+                    temporária: " ~ senha ~ ". Você será solicitado a criar uma nova senha ao entrar." %}
+                    <a href="https://wa.me/{{ whatsapp }}?text={{ msg }}" target="_blank"
+                        class="btn btn-success btn-lg">
+                        <i class="bi bi-whatsapp"></i> Enviar WhatsApp
+                    </a>
+                    <p class="text-muted mt-2 small">Número: {{ whatsapp }}</p>
+                    {% else %}
+                    <div class="alert alert-warning">
+                        Usuário não possui número de WhatsApp cadastrado.
+                    </div>
+                    {% endif %}
+
+                    <div class="mt-4">
+                        <a href="{{ url_for('solicitacoes') }}" class="btn btn-outline-primary">Voltar para
+                            Solicitações</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block conteudo %}
+<div class="container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-md-6">
+            <div class="card shadow">
+                <div class="card-header bg-primary text-white">
+                    <h4 class="mb-0">Resetar Senha</h4>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted">Revise os dados antes de confirmar o reset.</p>
+
+                    <div class="mb-3">
+                        <label class="fw-bold">Usuário (Login):</label>
+                        <div>{{ user['username'] }}</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="fw-bold">WhatsApp Cadastrado:</label>
+                        <div>{{ user['whatsapp'] or 'Não cadastrado' }}</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="fw-bold">Nome Solicitante (Reset):</label>
+                        <div>{{ req['name'] }}</div>
+                    </div>
+
+                    <hr>
+
+                    <form method="post">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Definir Nova Senha Temporária</label>
+                            <input type="text" name="senha" class="form-control form-control-lg"
+                                value="{{ random_password }}" required>
+                            <div class="form-text">Você pode usar a senha gerada ou digitar uma manual.</div>
+                        </div>
+
+                        <div class="d-grid gap-2">
+                            <button type="submit" class="btn btn-danger btn-lg">Confirmar Reset</button>
+                            <a href="{{ url_for('solicitacoes') }}" class="btn btn-secondary">Cancelar</a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

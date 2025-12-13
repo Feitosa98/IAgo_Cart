@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block conteudo %}
+<div class="container mt-4">
+    <h2 class="fw-bold text-secondary mb-4">Solicitações de Reset de Senha</h2>
+
+    <div class="card shadow-sm">
+        <div class="card-body p-0">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th class="ps-4">Data</th>
+                        <th>Usuário (Login)</th>
+                        <th>Nome Solicitante</th>
+                        <th>Status</th>
+                        <th class="text-end pe-4">Ação</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in resets %}
+                    <tr>
+                        <td class="ps-4">{{ r['created_at'][:10] }} {{ r['created_at'][11:16] }}</td>
+                        <td>{{ r['username'] }}</td>
+                        <td>{{ r['name'] }}</td>
+                        <td><span class="badge bg-warning text-dark">{{ r['status'] }}</span></td>
+                        <td class="text-end pe-4">
+                            <a href="{{ url_for('reset_confirm', req_id=r['id']) }}" class="btn btn-primary btn-sm">
+                                Analisar / Resetar
+                            </a>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="5" class="text-center py-4 text-muted">Nenhuma solicitação pendente.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,338 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h2 class="fw-bold text-primary">Editar Matrículas #{{ dados['numero_registro'] or imovel_id }}</h2>
+    {% if dados['status_trabalho'] == 'CONCLUIDO' %}
+    <div class="badge bg-success">Concluído por {{ dados['concluded_by'] }}</div>
+    {% else %}
+    <div class="badge bg-warning text-dark">Em edição por {{ usuario }}</div>
+    {% endif %}
+  </div>
+  <div class="btn-group">
+    <button
+      onclick="window.open('{{ url_for('visualizar_popup', imovel_id=imovel_id) }}', 'Popup{{ imovel_id }}', 'width=1200,height=800,resizable=yes,scrollbars=yes')"
+      class="btn btn-info text-white">
+      <i class="bi bi-file-image"></i> Ver Imagem
+    </button>
+
+    <a href="{{ url_for('iago_reanalisar', imovel_id=imovel_id) }}" class="btn btn-warning text-dark">
+      <i class="bi bi-robot"></i> IAGO Reanalisar
+    </a>
+
+    <a href="{{ url_for('index') }}" class="btn btn-outline-secondary">Voltar</a>
+  </div>
+</div>
+
+<form method="post">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="row">
+    <!-- SECTION 1: IDENTIFICAÇÃO (Full Width) -->
+    <div class="col-12">
+      <div class="card shadow-sm mb-4">
+        <div class="card-header bg-primary text-white fw-bold">Identificação e Classificação</div>
+        <div class="card-body">
+          <div class="row">
+            <div class="col-md-3 mb-3">
+              <label class="form-label">Número Registro</label>
+              <input type="text" class="form-control fw-bold" name="NUMERO_REGISTRO"
+                value="{{ dados['numero_registro'] or '' }}">
+            </div>
+            <div class="col-md-3 mb-3">
+              <label class="form-label">Tipo Registro</label>
+              <select class="form-select" name="REGISTRO_TIPO">
+                {% for cod, nome in registro_tipos.items() %}
+                <option value="{{ cod }}" {% if dados['registro_tipo']==cod %}selected{% endif %}>{{ nome }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-3 mb-3">
+              <label class="form-label">Localização</label>
+              <select class="form-select" name="LOCALIZACAO">
+                {% for cod, nome in localizacoes.items() %}
+                <option value="{{ cod }}" {% if dados['localizacao']==cod %}selected{% endif %}>{{ nome }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-3 mb-3">
+              <label class="form-label">Tipo Imóvel</label>
+              <select class="form-select" name="TIPO_DE_IMOVEL">
+                {% for cod, nome in tipos_imovel.items() %}
+                <option value="{{ cod }}" {% if dados['tipo_de_imovel']==cod %}selected{% endif %}>{{ nome }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Contribuinte(s)</label>
+            <input type="text" class="form-control" name="CONTRIBUINTE" value="{{ contrib_str }}"
+              placeholder="Separar por vírgula">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SECTION 2: ENDEREÇO (Full Width) -->
+    <div class="col-12">
+      <div class="card shadow-sm mb-4">
+        <div class="card-header bg-light fw-bold">Endereço</div>
+        <div class="card-body">
+          <div class="row">
+            <div class="col-md-2 mb-3">
+              <label class="form-label">Tipo</label>
+              <select class="form-select" name="TIPO_LOGRADOURO">
+                {% for cod, nome in tipos_logradouro.items() %}
+                <option value="{{ cod }}" {% if dados['tipo_logradouro']==cod %}selected{% endif %}>{{ nome }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-6 mb-3">
+              <label class="form-label">Logradouro</label>
+              <input type="text" class="form-control" name="NOME_LOGRADOURO"
+                value="{{ dados['nome_logradouro'] or '' }}">
+            </div>
+            <div class="col-md-2 mb-3">
+              <label class="form-label">Número</label>
+              <input type="text" class="form-control" name="NUMERO_LOGRADOURO"
+                value="{{ dados['numero_logradouro'] or '' }}">
+            </div>
+            <div class="col-md-2 mb-3">
+              <label class="form-label">Complemento</label>
+              <input type="text" class="form-control" name="COMPLEMENTO" value="{{ dados['complemento'] or '' }}">
+            </div>
+          </div>
+          <div class="row">
+            <div class="col-md-4 mb-3">
+              <label class="form-label">Bairro</label>
+              <input type="text" class="form-control" name="BAIRRO" value="{{ dados['bairro'] or '' }}">
+            </div>
+            <div class="col-md-2 mb-3">
+              <label class="form-label">CEP</label>
+              <input type="text" class="form-control" name="CEP" value="{{ dados['cep'] or '' }}">
+            </div>
+            <div class="col-md-4 mb-3">
+              <label class="form-label">Cidade</label>
+              <input type="text" class="form-control" name="CIDADE" value="{{ dados['cidade'] or '' }}">
+            </div>
+            <div class="col-md-2 mb-3">
+              <label class="form-label">UF</label>
+              <select class="form-select" name="UF">
+                {% for cod, sigla in ufs.items() %}
+                <option value="{{ cod }}" {% if dados['uf']==cod %}selected{% endif %}>{{ sigla }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small text-muted">Vários Endereços? (S/N)</label>
+            <input type="text" class="form-control" name="VARIOS_ENDERECOS"
+              value="{{ dados['varios_enderecos'] or '' }}">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SECTION 3: DETALHES (Split Columns) -->
+    <div class="col-md-6">
+      <!-- Loteamento -->
+      <div class="card shadow-sm mb-4 h-100">
+        <div class="card-header bg-secondary text-white fw-bold">Loteamento / Quadra</div>
+        <div class="card-body">
+          <div class="mb-3">
+            <label class="form-label">Loteamento</label>
+            <input type="text" class="form-control" name="LOTEAMENTO" value="{{ dados['loteamento'] or '' }}">
+          </div>
+          <div class="row">
+            <div class="col-6 mb-3">
+              <label class="form-label">Quadra</label>
+              <input type="text" class="form-control" name="QUADRA" value="{{ dados['quadra'] or '' }}">
+            </div>
+            <div class="col-6 mb-3">
+              <label class="form-label">Conjunto</label>
+              <input type="text" class="form-control" name="CONJUNTO" value="{{ dados['conjunto'] or '' }}">
+            </div>
+            <div class="col-6 mb-3">
+              <label class="form-label">Setor</label>
+              <input type="text" class="form-control" name="SETOR" value="{{ dados['setor'] or '' }}">
+            </div>
+            <div class="col-6 mb-3">
+              <label class="form-label">Lote</label>
+              <input type="text" class="form-control" name="LOTE" value="{{ dados['lote'] or '' }}">
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-6">
+      <!-- Rural (Hidden) -->
+      <div class="card shadow-sm mb-4" id="cardRural" style="display: none;">
+        <div class="card-header bg-success text-white fw-bold">Dados Rurais</div>
+        <div class="card-body">
+          <div class="row">
+            <div class="col-md-6 mb-3">
+              <label class="form-label">CAR</label>
+              <input type="text" class="form-control" name="RURAL_CAR" value="{{ dados['rural_car'] or '' }}">
+            </div>
+            <div class="col-md-6 mb-3">
+              <label class="form-label">NIRF</label>
+              <input type="text" class="form-control" name="RURAL_NIRF" value="{{ dados['rural_nirf'] or '' }}">
+            </div>
+          </div>
+          <div class="row">
+            <div class="col-md-6 mb-3">
+              <label class="form-label">CCIR</label>
+              <input type="text" class="form-control" name="RURAL_CCIR" value="{{ dados['rural_ccir'] or '' }}">
+            </div>
+            <div class="col-md-6 mb-3">
+              <label class="form-label">INCRA</label>
+              <input type="text" class="form-control" name="RURAL_NUMERO_INCRA"
+                value="{{ dados['rural_numero_incra'] or '' }}">
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Denominação Rural</label>
+            <input type="text" class="form-control" name="RURAL_DENOMINACAORURAL"
+              value="{{ dados['rural_denominacaorural'] or '' }}">
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Acidente Geográfico</label>
+            <input type="text" class="form-control" name="RURAL_ACIDENTEGEOGRAFICO"
+              value="{{ dados['rural_acidentegeografico'] or '' }}">
+          </div>
+        </div>
+      </div>
+
+      <!-- Condominio (Default) -->
+      <div class="card shadow-sm mb-4" id="cardCondominio">
+        <div class="card-header bg-info text-white fw-bold">Dados do Condomínio</div>
+        <div class="card-body">
+          <div class="mb-3">
+            <label class="form-label">Nome Condomínio</label>
+            <input type="text" class="form-control" name="CONDOMINIO_NOME" value="{{ dados['condominio_nome'] or '' }}">
+          </div>
+          <div class="row">
+            <div class="col-4 mb-3">
+              <label class="form-label">Bloco</label>
+              <input type="text" class="form-control" name="CONDOMINIO_BLOCO"
+                value="{{ dados['condominio_bloco'] or '' }}">
+            </div>
+            <div class="col-4 mb-3">
+              <label class="form-label">Torre</label>
+              <input type="text" class="form-control" name="CONDOMINIO_TORRE"
+                value="{{ dados['condominio_torre'] or '' }}">
+            </div>
+            <div class="col-4 mb-3">
+              <label class="form-label">Apto/Unid.</label>
+              <input type="text" class="form-control" name="CONDOMINIO_APTO"
+                value="{{ dados['condominio_apto'] or '' }}">
+            </div>
+          </div>
+          <div class="row">
+            <div class="col-md-6 mb-3">
+              <label class="form-label">Vaga</label>
+              <input type="text" class="form-control" name="CONDOMINIO_VAGA"
+                value="{{ dados['condominio_vaga'] or '' }}">
+            </div>
+            <div class="col-md-6 mb-3">
+              <label class="form-label">Conjunto</label>
+              <input type="text" class="form-control" name="CONDOMINIO_CONJUNTO"
+                value="{{ dados['condominio_conjunto'] or '' }}">
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="d-flex justify-content-between align-items-center py-4 border-top">
+    <div class="text-muted small">
+      <form action="{{ url_for('liberar_imovel', imovel_id=imovel_id) }}" method="post" class="d-inline">
+        <button type="submit" class="btn btn-link text-warning p-0 ms-2"
+          style="font-size: 0.8rem; text-decoration: none;">
+          (Forçar Liberação da Trava)
+        </button>
+      </form>
+    </div>
+    <div class="d-flex gap-2">
+      <a href="{{ url_for('index') }}" class="btn btn-secondary">Cancelar</a>
+      <button type="submit" class="btn btn-primary">
+        <i class="bi bi-save"></i> Salvar
+      </button>
+      <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#modalConcluir">
+        <i class="bi bi-check-circle"></i> Concluir
+      </button>
+    </div>
+  </div>
+</form>
+
+<!-- Modal de Confirmação -->
+<div class="modal fade" id="modalConcluir" tabindex="-1" aria-labelledby="modalConcluirLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header bg-success text-white">
+        <h5 class="modal-title" id="modalConcluirLabel">Confirmar Conclusão</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p>Tem certeza que deseja concluir este imóvel?</p>
+        <p class="text-danger fw-bold"><i class="bi bi-exclamation-triangle-fill"></i> Atenção: Uma vez concluído, você
+          não poderá mais editar este registro.</p>
+        <p class="small text-muted mb-0">Certifique-se de ter salvo todas as suas alterações antes de concluir.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-success" onclick="submitConclude()">Confirmar Conclusão</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  function submitConclude() {
+    const form = document.querySelector('form');
+    // Set action to conclude endpoint
+    form.action = "{{ url_for('concluir_imovel', imovel_id=imovel_id) }}";
+    form.submit();
+  }
+</script>
+
+
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    // Initialize TomSelect for all Selects
+    document.querySelectorAll('select').forEach((el) => {
+      new TomSelect(el, {
+        create: false,
+        sortField: {
+          field: "text",
+          direction: "asc"
+        }
+      });
+    });
+
+    const locSelect = document.querySelector('select[name="LOCALIZACAO"]');
+    const cardRural = document.getElementById('cardRural');
+    const cardCondo = document.getElementById('cardCondominio');
+
+    function toggleFields() {
+      // With TomSelect, value is still updated on original select
+      const val = locSelect.value;
+      if (val == '1') {
+        cardRural.style.display = 'block';
+      } else {
+        cardRural.style.display = 'none';
+      }
+      cardCondo.style.display = 'block';
+    }
+
+    if (locSelect) {
+      locSelect.addEventListener('change', toggleFields);
+      // Also listen to TomSelect change if needed, but 'change' on original usually works.
+      // If not, we can find the TS instance? 
+      // Let's rely on standard event or just run it directly if strict.
+      toggleFields();
+    }
+  });
+</script>
+{% endblock %}

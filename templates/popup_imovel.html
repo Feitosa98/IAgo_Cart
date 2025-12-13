@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Matrícula #{{ dados['numero_registro'] }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            padding: 20px;
+        }
+
+        .data-label {
+            font-weight: bold;
+            color: #555;
+        }
+
+        .img-container {
+            border: 1px solid #ddd;
+            background: #fff;
+            padding: 10px;
+            text-align: center;
+            min-height: 400px;
+        }
+
+        .img-container img {
+            max-width: 100%;
+            height: auto;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container-fluid">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h4 class="mb-0">Matrícula: {{ dados['numero_registro'] or 'S/N' }}</h4>
+            <button onclick="window.close()" class="btn btn-secondary btn-sm">Fechar</button>
+        </div>
+
+        <div class="row">
+            <div class="col-md-4">
+                <div class="card shadow-sm mb-3">
+                    <div class="card-header bg-primary text-white">Dados da Matrícula</div>
+                    <div class="card-body small">
+                        <div class="mb-1"><span class="data-label">ID Sistema:</span> {{ imovel_id }}</div>
+                        <div class="mb-1"><span class="data-label">Status:</span> {{ dados['status_trabalho'] or
+                            'PENDENTE' }}</div>
+                        <hr>
+                        <div class="mb-1"><span class="data-label">Logradouro:</span> {{ dados['nome_logradouro'] }}
+                        </div>
+                        <div class="mb-1"><span class="data-label">Bairro:</span> {{ dados['bairro'] }}</div>
+                        <div class="mb-1"><span class="data-label">Cidade:</span> {{ dados['cidade'] }} / {{ dados['uf']
+                            }}</div>
+                        <div class="mb-1"><span class="data-label">CEP:</span> {{ dados['cep'] }}</div>
+                        <hr>
+                        <div class="mb-1"><span class="data-label">Quadra:</span> {{ dados['quadra'] }}</div>
+                        <div class="mb-1"><span class="data-label">Lote:</span> {{ dados['lote'] }}</div>
+                    </div>
+                </div>
+
+                <div class="d-grid">
+                    <a href="{{ url_for('editar_imovel', imovel_id=imovel_id) }}" target="_top" class="btn btn-primary">
+                        <i class="bi bi-pencil"></i> Editar Cadastro
+                    </a>
+                    <div class="text-muted text-center small mt-2">
+                        Abrirá na janela principal
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-8">
+                <div class="card shadow-sm">
+                    <div class="card-header bg-white fw-bold">Imagem TIFF (Visualização)</div>
+                    <div class="card-body img-container p-0" style="height: 600px;">
+                        {% if dados['arquivo_tiff'] %}
+                        <object data="{{ url_for('ver_pdf_imovel', imovel_id=imovel_id) }}" type="application/pdf"
+                            width="100%" height="100%">
+                            <p>Seu navegador não suporta visualização de PDF. <a
+                                    href="{{ url_for('ver_pdf_imovel', imovel_id=imovel_id) }}">Baixar Arquivo</a>.</p>
+                        </object>
+                        {% else %}
+                        <div class="alert alert-warning m-3">Sem imagem associada.</div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+
+</html>

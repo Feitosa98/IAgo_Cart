@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block conteudo %}
+<h2 class="fw-bold text-secondary mb-4">Dashboard</h2>
+
+<div class="row g-4 mb-4">
+    <div class="col-md-4">
+        <div class="card shadow-sm border-start border-primary border-4">
+            <div class="card-body">
+                <div class="text-muted small text-uppercase fw-bold">Total Matrículas</div>
+                <div class="display-5 fw-bold text-dark">{{ total }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card shadow-sm border-start border-success border-4">
+            <div class="card-body">
+                <div class="text-muted small text-uppercase fw-bold">Concluídas</div>
+                <div class="display-5 fw-bold text-success">{{ concluidos }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card shadow-sm border-start border-warning border-4">
+            <div class="card-body">
+                <div class="text-muted small text-uppercase fw-bold">Pendentes</div>
+                <div class="display-5 fw-bold text-warning">{{ pendentes }}</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="alert alert-light border shadow-sm">
+    <h5 class="alert-heading"><i class="bi bi-bar-chart-fill"></i> Estatísticas Avançadas</h5>
+    <p class="mb-0">Funcionalidade de métricas de desempenho detalhadas será implementada em atualizações futuras,
+        utilizando logs de auditoria.</p>
+</div>
+{% endblock %}

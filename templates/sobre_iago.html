@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+
+{% block conteudo %}
+<div class="container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-md-10">
+            <div class="card shadow border-0">
+                <div class="card-body p-5">
+                    <div class="text-center mb-5">
+                        <img src="{{ url_for('static', filename='logo_iago.png') }}" alt="IAGO Logo" class="mb-3"
+                            style="max-height: 100px;">
+                        <h1 class="fw-bold text-primary display-5">Conheça o IAGO</h1>
+                        <p class="lead text-muted">Inteligência Artificial GO (Agora)</p>
+                    </div>
+
+                    <div class="row align-items-center mb-5">
+                        <div class="col-md-6">
+                            <h3 class="fw-bold mb-3">O que é?</h3>
+                            <p>
+                                O <strong>IAGO</strong> é o assistente inteligente integrado ao sistema Indicador Real.
+                                Ele foi desenvolvido para aprender com o seu trabalho e automatizar a extração de dados
+                                complexos das matrículas.
+                            </p>
+                            <p>
+                                Diferente de sistemas estáticos, o IAGO é <strong>adaptativo</strong>. Cada vez que você
+                                corrige ou preenche um campo e conclui uma matrícula, ele "observa"
+                                o documento original e aprende como aquela informação estava escrita.
+                            </p>
+                        </div>
+                        <div class="col-md-6 text-center">
+                            <i class="bi bi-robot text-info" style="font-size: 8rem;"></i>
+                        </div>
+                    </div>
+
+                    <div class="row mb-5">
+                        <div class="col-md-4 text-center">
+                            <div class="p-4 border rounded bg-light h-100 shadow-sm">
+                                <i class="bi bi-mortarboard fs-1 text-primary mb-3"></i>
+                                <h5 class="fw-bold">Nível {{ stats.level_title }}</h5>
+                                <h2 class="display-6 fw-bold text-dark">{{ stats.level }}</h2>
+                                <p class="small text-muted">{{ stats.patterns_count }} padrões aprendidos</p>
+                            </div>
+                        </div>
+                        <div class="col-md-4 text-center">
+                            <div class="p-4 border rounded bg-light h-100 shadow-sm">
+                                <i class="bi bi-file-earmark-check fs-1 text-success mb-3"></i>
+                                <h5 class="fw-bold">Processou</h5>
+                                <h2 class="display-6 fw-bold text-dark">{{ stats.processed_count }}</h2>
+                                <p class="small text-muted">Matrículas concluídas</p>
+                            </div>
+                        </div>
+                        <div class="col-md-4 text-center">
+                            <div class="p-4 border rounded bg-light h-100 shadow-sm">
+                                <i class="bi bi-lightning fs-1 text-warning mb-3"></i>
+                                <h5 class="fw-bold">Conhecimento</h5>
+                                <ul class="list-unstyled text-start small mt-3">
+                                    {% for p in stats.top_patterns %}
+                                    <li><i class="bi bi-check-circle-fill text-success me-1"></i> Aprendeu a identificar
+                                        <strong>{{ p.field }}</strong></li>
+                                    {% else %}
+                                    <li class="text-muted text-center">Ainda aprendendo...</li>
+                                    {% endfor %}
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="alert alert-info">
+                        <h5 class="fw-bold"><i class="bi bi-info-circle-fill"></i> Como usar?</h5>
+                        <p class="mb-0">
+                            Simplesmente continue trabalhando! Ao clicar em <strong>Concluir</strong> na tela de edição,
+                            o IAGO processa o que você fez.
+                            Se tiver um arquivo antigo, use o botão <strong>"🤖 IAGO Reanalisar"</strong> para aplicar o
+                            conhecimento mais recente.
+                        </p>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

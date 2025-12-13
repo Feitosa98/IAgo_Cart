@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block conteudo %}
+<div class="row justify-content-center">
+    <div class="col-lg-10">
+        <div class="card shadow-sm border-0 mt-4">
+            <div class="card-body p-5">
+                <h2 class="mb-4 text-primary fw-bold">Termos e Condições de Uso</h2>
+                <p class="text-muted">Versão 1.0 - Dezembro de 2025</p>
+
+                <hr>
+
+                <h4 class="mt-4">1. Aceitação</h4>
+                <p>Este sistema, denominado <strong>Indicador Real - Web</strong>, é de propriedade intelectual da
+                    <strong>Feitosa Soluções em Informática</strong> e é licenciado para uso exclusivo do
+                    <strong>Cartório 2º Ofício de Manacapuru</strong>. Ao acessar este sistema, você (o "Usuário")
+                    concorda integralmente com estes Termos.
+                </p>
+
+                <h4 class="mt-4">2. Inteligência Artificial e Automação</h4>
+                <p>
+                    O sistema disponibiliza recursos de IA (IAGO) para sugerir e preencher campos automaticamente
+                    baseados em documentos digitalizados.
+                </p>
+                <div class="alert alert-warning small">
+                    <strong>Importante:</strong> A IA é uma ferramenta de auxílio e <strong>não substitui a conferência
+                        humana</strong>. É responsabilidade integral do usuário verificar a exatidão de todos os dados
+                    extraídos ou sugeridos pelo sistema antes da conclusão ou emissão de documentos.
+                </div>
+                <p>
+                    Os desenvolvedores não se responsabilizam por erros de extração, falhas de OCR ou interpretações
+                    incorretas feitas pelo algoritmo.
+                </p>
+
+                <h4 class="mt-4">3. Acesso e Credenciais</h4>
+                <p>O acesso ao sistema é pessoal e intransferível, concedido estritamente para fins profissionais de
+                    desempenho das funções notariais e registrais.</p>
+                <ul>
+                    <li>O Usuário é o único responsável pela guarda e sigilo de sua senha.</li>
+                    <li>É proibido compartilhar credenciais de acesso com terceiros.</li>
+                    <li>Qualquer suspeita de acesso indevido deve ser comunicada imediatamente à administração.</li>
+                </ul>
+
+                <h4 class="mt-4">3. Conduta e Responsabilidades</h4>
+                <p>O Usuário compromete-se a:</p>
+                <ul>
+                    <li>Utilizar o sistema apenas para finalidades lícitas e autorizadas.</li>
+                    <li>Não tentar burlar mecanismos de segurança, realizar engenharia reversa ou explorar
+                        vulnerabilidades.</li>
+                    <li>Manter o sigilo das informações acessadas, respeitando o segredo de justiça (quando aplicável) e
+                        a privacidade das partes.</li>
+                </ul>
+                <p>A violação destas normas poderá acarretar sanções administrativas, civis e penais, conforme a
+                    legislação vigente.</p>
+
+                <h4 class="mt-4">4. Propriedade Intelectual</h4>
+                <p>Todo o código-fonte, interface visual, logomarcas e documentação associada a este software são
+                    protegidos pelas Leis de Direito Autoral e Propriedade Intelectual. É vedada a cópia, reprodução ou
+                    distribuição não autorizada.</p>
+
+                <h4 class="mt-4">5. Auditoria</h4>
+                <p>Para fins de segurança e conformidade, todas as ações realizadas no sistema (visualização, edição,
+                    exportação de dados) são registradas em logs de auditoria, que podem ser utilizados para apuração de
+                    responsabilidades.</p>
+
+                <h4 class="mt-4">6. Disposições Gerais</h4>
+                <p>A administração reserva-se o direito de suspender o acesso de qualquer usuário que viole estes
+                    termos. Dúvidas sobre o uso do sistema devem ser encaminhadas ao suporte técnico.</p>
+
+                <div class="mt-5 text-center">
+                    <a href="{{ url_for('login') }}" class="btn btn-outline-primary">Voltar</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
