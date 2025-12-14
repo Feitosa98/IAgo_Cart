@@ -6,9 +6,59 @@ import os
 import socket
 import webbrowser
 import time
+import waitress
+import pystray
+from PIL import Image
+from pystray import MenuItem as item
 
 # Ensure we can find the app module
-sys.path.append(os.getcwd())
+# Ensure we can find the app module
+if getattr(sys, 'frozen', False):
+    # Running in PyInstaller Bundle
+    sys.path.append(sys._MEIPASS)
+else:
+    # Running normally
+    sys.path.append(os.getcwd())
+
+# Import the Flask app
+import logging
+
+# Configure logging to file
+logging.basicConfig(filename='server_error.log', level=logging.DEBUG, 
+                    format='%(asctime)s %(levelname)s: %(message)s')
+
+# DEBUG: Inspect Frozen Environment
+if getattr(sys, 'frozen', False):
+    try:
+        logging.info(f"FROZEN MODE. MEIPASS: {sys._MEIPASS}")
+        logging.info(f"SYS.PATH: {sys.path}")
+        files = os.listdir(sys._MEIPASS)
+        logging.info(f"MEIPASS FILES: {files}")
+        
+        # Check explicitly for imoveis_web
+        if 'imoveis_web.py' in files or 'imoveis_web.pyc' in files:
+            logging.info("imoveis_web file FOUND in MEIPASS.")
+        else:
+            logging.error("imoveis_web file NOT FOUND in MEIPASS.")
+            
+    except Exception as e:
+        logging.error(f"Debug check failed: {e}")
+
+# Redirect stderr to logging
+class StreamToLogger(object):
+    def __init__(self, logger, log_level=logging.ERROR):
+        self.logger = logger
+        self.log_level = log_level
+        self.linebuf = ''
+
+    def write(self, buf):
+        for line in buf.rstrip().splitlines():
+            self.logger.log(self.log_level, line.rstrip())
+
+    def flush(self):
+        pass
+
+sys.stderr = StreamToLogger(logging.getLogger('STDERR'), logging.ERROR)
 
 # Import the Flask app
 from imoveis_web import app
@@ -30,16 +80,30 @@ class ServerGUI:
         self.root.geometry("400x250")
         self.root.configure(bg="#f0f0f0")
         
+        # Determine paths for PyInstaller assets (Icon)
+        if getattr(sys, 'frozen', False):
+            base_dir = sys._MEIPASS
+        else:
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            
+        self.icon_path = os.path.join(base_dir, "icon.ico")
+        if not os.path.exists(self.icon_path):
+             # Fallback if icon.ico is not found (e.g. dev mode without conversion)
+             # Try to start without, or use default
+             self.icon_path = None
+
+        # Set Window Icon
+        if self.icon_path and os.path.exists(self.icon_path):
+            try:
+                self.root.iconbitmap(self.icon_path)
+            except:
+                pass
+
         # Center window
         self.center_window()
 
-        # Icon (try to load if exists)
-        try:
-             # If bundled, icon might be in _internal or similar. 
-             # For now simple.
-             pass
-        except:
-            pass
+        # Handle Close (Minimize to Tray)
+        self.root.protocol('WM_DELETE_WINDOW', self.minimize_to_tray)
 
         # Title Label
         tk.Label(root, text="Sistema Indicador Real", font=("Helvetica", 16, "bold"), bg="#f0f0f0", fg="#333").pack(pady=20)
@@ -60,7 +124,7 @@ class ServerGUI:
         btn_frame.pack(pady=20)
 
         tk.Button(btn_frame, text="Abrir no Navegador", command=self.open_browser, bg="#4CAF50", fg="white", font=("Arial", 10, "bold"), padx=10, pady=5).pack(side=tk.LEFT, padx=10)
-        tk.Button(btn_frame, text="Parar e Sair", command=self.stop_server, bg="#f44336", fg="white", font=("Arial", 10, "bold"), padx=10, pady=5).pack(side=tk.LEFT, padx=10)
+        tk.Button(btn_frame, text="Esconder (Tray)", command=self.minimize_to_tray, bg="#FF9800", fg="white", font=("Arial", 10, "bold"), padx=10, pady=5).pack(side=tk.LEFT, padx=10)
 
         # Server Thread
         self.server_thread = threading.Thread(target=self.run_server, daemon=True)
@@ -79,14 +143,11 @@ class ServerGUI:
 
     def run_server(self):
         try:
-            # Run Flask
-            # Note: app.run is blocking, so this thread stays here.
-            app.run(host="0.0.0.0", port=5000, debug=False, use_reloader=False)
+            waitress.serve(app, host="0.0.0.0", port=5000, threads=6)
         except Exception as e:
             self.status_var.set(f"Erro: {e}")
 
     def check_status(self):
-        # Determine IP
         ip = get_ip()
         url = f"http://{ip}:5000"
         self.url_var.set(url)
@@ -96,9 +157,44 @@ class ServerGUI:
     def open_browser(self):
         webbrowser.open(self.url_var.get())
 
-    def stop_server(self):
-        # Flask with werkzeug server is hard to stop cleanly without signals.
-        # Since we are an EXE, we can just kill the process.
+    def minimize_to_tray(self):
+        self.root.withdraw()
+        
+        # Prepare image for tray
+        if self.icon_path and os.path.exists(self.icon_path):
+            image = Image.open(self.icon_path)
+        else:
+            # Create a fallback image (simple colored square)
+            image = Image.new('RGB', (64, 64), color = (73, 109, 137))
+
+        menu = (
+             item('Indicador Real (Online)', lambda: None, enabled=False),
+             item('Abrir Painel', self.restore_window),
+             item('Abrir no Navegador', self.open_browser),
+             item('Reiniciar Sistema', self.restart_program),
+             item('Sair (Desligar)', self.quit_app)
+        )
+        
+        self.tray_icon = pystray.Icon("name", image, "Indicador Real Server", menu)
+        
+        # Run tray loop in separate thread so it doesnt block? 
+        # pystray run() is blocking. We can run it here, but we need to ensure tk mainloop is fine.
+        # usually run_detached is strictly creating a thread.
+        threading.Thread(target=self.tray_icon.run, daemon=True).start()
+
+    def restore_window(self):
+        self.tray_icon.stop() # Stop tray
+        self.root.after(0, self.root.deiconify)
+
+    def restart_program(self):
+        self.tray_icon.stop()
+        self.root.destroy()
+        # Restart
+        python = sys.executable
+        os.execl(python, python, *sys.argv)
+
+    def quit_app(self):
+        self.tray_icon.stop()
         self.root.destroy()
         sys.exit(0)
 

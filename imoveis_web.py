@@ -2,6 +2,7 @@ import sqlite3
 import json
 from datetime import datetime, timedelta, timezone
 import os
+import sys
 import re
 import pytesseract
 from PIL import Image
@@ -12,6 +13,9 @@ import pandas as pd
 from werkzeug.utils import secure_filename
 from flask import Response
 import iago
+from apscheduler.schedulers.background import BackgroundScheduler
+import updater
+import atexit
 
 from flask import (
     Flask,
@@ -35,11 +39,22 @@ from werkzeug.security import generate_password_hash, check_password_hash
 # CONFIGURAÇÃO
 # ==============================
 
-DB_PATH = "imoveis.db"
+def get_base_path():
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(sys.executable)
+    return os.getcwd()
+
+BASE_DIR = get_base_path()
+DB_PATH = os.path.join(BASE_DIR, "imoveis.db")
 SECRET_KEY = "onr-indicador-real-web-123"
-UPLOAD_FOLDER = "uploads"
+UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads")
 ALLOWED_EXTENSIONS = {'tif', 'tiff', 'png', 'jpg', 'jpeg', 'pdf'}
 
+
+# Tenta importar pdf2image
+# Load .env variables
+from dotenv import load_dotenv
+load_dotenv(os.path.join(BASE_DIR, ".env")) # Load from specific path
 
 # Tenta importar pdf2image
 try:
@@ -47,7 +62,34 @@ try:
 except ImportError:
     convert_from_path = None
 
-app = Flask(__name__)
+# Configure OCR Paths
+TESSERACT_CMD = os.getenv("TESSERACT_CMD", "")
+POPPLER_PATH = os.getenv("POPPLER_PATH", "")
+
+if TESSERACT_CMD and os.path.exists(TESSERACT_CMD):
+    pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
+else:
+    # Try default if not set
+    # Common windows path
+    default_tess = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+    if os.path.exists(default_tess):
+        pytesseract.pytesseract.tesseract_cmd = default_tess
+
+# Validate Poppler
+if POPPLER_PATH and not os.path.exists(POPPLER_PATH):
+    # Try to find it common or reset
+    POPPLER_PATH = "" 
+
+# Determine paths for PyInstaller
+if getattr(sys, 'frozen', False):
+    # If frozen, assets are in sys._MEIPASS
+    base_dir = sys._MEIPASS
+    template_folder = os.path.join(base_dir, 'templates')
+    static_folder = os.path.join(base_dir, 'static')
+    app = Flask(__name__, template_folder=template_folder, static_folder=static_folder)
+else:
+    app = Flask(__name__)
+
 app.secret_key = SECRET_KEY
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
@@ -55,6 +97,193 @@ if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(seconds=3600)
+
+def init_db():
+    """Initializes the database if it doesn't exist or is empty."""
+    # Use global DB_PATH which is now absolute
+    
+    # Check if we need to init (simple check: if users table exists)
+    needs_init = False
+    if not os.path.exists(db_path) or os.path.getsize(db_path) == 0:
+        needs_init = True
+    else:
+        try:
+            conn = sqlite3.connect(db_path)
+            cur = conn.cursor()
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
+            if not cur.fetchone():
+                needs_init = True
+            conn.close()
+        except:
+            needs_init = True
+
+    if needs_init:
+        print(f"[INIT] Initializing database at {db_path}...")
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+
+        # 1. Users
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL,
+                whatsapp TEXT,
+                is_temporary_password INTEGER DEFAULT 0,
+                profile_image TEXT,
+                created_at TEXT,
+                email TEXT,
+                nome_completo TEXT,
+                cpf TEXT,
+                last_seen TEXT
+            )
+        """)
+        
+        # 2. Imoveis
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS imoveis (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                numero_registro TEXT,
+                registro_tipo INTEGER,
+                status_trabalho TEXT DEFAULT 'PENDENTE',
+                concluded_by TEXT,
+                ocr_text TEXT,
+                arquivo_tiff TEXT,
+                
+                nome_logradouro TEXT,
+                numero_logradouro TEXT,
+                complemento TEXT,
+                bairro TEXT,
+                cep TEXT,
+                cidade TEXT,
+                uf INTEGER,
+                
+                tipo_de_imovel INTEGER,
+                localizacao INTEGER,
+                tipo_logradouro INTEGER,
+                varios_enderecos TEXT,
+                
+                loteamento TEXT,
+                quadra TEXT,
+                conjunto TEXT,
+                setor TEXT,
+                lote TEXT,
+                
+                contribuinte TEXT,
+                
+                rural_car TEXT,
+                rural_nirf TEXT,
+                rural_ccir TEXT,
+                rural_numero_incra TEXT,
+                rural_sigef TEXT,
+                rural_denominacaorural TEXT,
+                rural_acidentegeografico TEXT,
+                
+                condominio_nome TEXT,
+                condominio_bloco TEXT,
+                condominio_conjunto TEXT,
+                condominio_torre TEXT,
+                condominio_apto TEXT,
+                condominio_vaga TEXT,
+                
+                updated_at TEXT
+            )
+        """)
+
+        # 3. Locks
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS imoveis_lock (
+                imovel_id INTEGER PRIMARY KEY,
+                editing_by TEXT,
+                editing_since TEXT
+            )
+        """)
+
+        # 4. Resets
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS password_resets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT,
+                name TEXT,
+                status TEXT DEFAULT 'PENDENTE',
+                created_at TEXT
+            )
+        """)
+        
+        # 5. Config
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS system_config (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        """)
+
+        # INSERT DEFAULT ADMIN
+        # Only if users table is empty
+        cur.execute("SELECT count(*) FROM users")
+        if cur.fetchone()[0] == 0:
+            hashed = generate_password_hash("admin") # Default password
+            now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+            cur.execute("INSERT INTO users (username, password_hash, role, created_at, nome_completo) VALUES (?, ?, ?, ?, ?)", 
+                        ("admin", hashed, "admin", now, "Administrador"))
+            print("[INIT] Default admin user created.")
+        
+        # Insert Default Config
+        defaults = {
+            "smtp_server": "smtp.gmail.com",
+            "smtp_port": "587",
+            "smtp_user": "",
+            "smtp_password": "",
+            "smtp_tls": "1"
+        }
+        for key, val in defaults.items():
+            cur.execute("INSERT OR IGNORE INTO system_config (key, value) VALUES (?, ?)", (key, val))
+
+        conn.commit()
+        conn.close()
+        print("[INIT] Database initialization complete.")
+    
+    # Run Migrations (Safe to run always)
+    migrate_db()
+
+def migrate_db():
+    """Checks for missing columns and adds them (Auto-Migration)."""
+    db_path = "imoveis.db"
+    if not os.path.exists(db_path):
+        return
+
+    try:
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        
+        # Get existing columns
+        cur.execute("PRAGMA table_info(users)")
+        columns = [row[1] for row in cur.fetchall()]
+        
+        # Check and add 'nome_completo'
+        if 'nome_completo' not in columns:
+            print("[MIGRATE] Adding 'nome_completo' to users...")
+            cur.execute("ALTER TABLE users ADD COLUMN nome_completo TEXT")
+            
+        # Check and add 'cpf'
+        if 'cpf' not in columns:
+             print("[MIGRATE] Adding 'cpf' to users...")
+             cur.execute("ALTER TABLE users ADD COLUMN cpf TEXT")
+
+        # Check and add 'last_seen'
+        if 'last_seen' not in columns:
+             print("[MIGRATE] Adding 'last_seen' to users...")
+             cur.execute("ALTER TABLE users ADD COLUMN last_seen TEXT")
+
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"[MIGRATE] Error during migration: {e}")
+
+
+# Run init on module load (or app start)
+init_db()
 
 login_manager = LoginManager()
 login_manager.init_app(app)
@@ -66,7 +295,68 @@ def unauthorized():
         return jsonify({"status": "error", "message": "Sessão expirada. Faça login novamente.", "error": "unauthorized"}), 401
     return redirect(url_for('login'))
 
-CNS_CODIGO = "004879" # CNS da serventia
+
+# Load config from .env or default
+CNS_CODIGO = os.getenv("CNS_CODIGO", "004879") 
+CARTORIO_NAME = os.getenv("CARTORIO_NAME", "Cartório 2º Ofício de Manacapuru")
+
+@app.context_processor
+def inject_global_vars():
+    return dict(
+        cartorio_name=CARTORIO_NAME,
+        cns_codigo=CNS_CODIGO
+    )
+
+
+# Scheduler Config
+cron_scheduler = BackgroundScheduler()
+
+# Notifier for admins about updates
+def notify_admins_of_update(commits_behind):
+    admins = get_admin_emails()
+    if not admins:
+        return
+        
+    subject = f"Nova Atualização Disponível - Indicador Real"
+    body = f"<p>Uma nova atualização está disponível para o sistema (atrasado por {commits_behind} commits).</p><p>Acesse /atualizacoes para verificar.</p>"
+    
+    # Send to all
+    import email_service
+    for email in admins:
+         email_service.send_email_sync(email, subject, body)
+
+# Global state for updates
+UPDATE_STATE = {
+    'available': False,
+    'commits_behind': 0,
+    'last_check': None
+}
+
+def scheduled_update_check():
+    """Daily check for updates."""
+    global UPDATE_STATE
+    try:
+        logging.info("Checking for updates (Scheduled)...")
+        res = updater.check_for_updates()
+        if res and not res.get('error'):
+            UPDATE_STATE['available'] = res['update_available']
+            UPDATE_STATE['commits_behind'] = res['commits_behind']
+            UPDATE_STATE['last_check'] = datetime.now().isoformat()
+            if res['update_available']:
+                logging.info(f"Update available! Behind by {res['commits_behind']} commits.")
+                # Notify admins
+                with app.app_context():
+                     notify_admins_of_update(res['commits_behind'])
+    except Exception as e:
+        logging.error(f"Error in scheduled check: {e}")
+
+# Start Scheduler
+cron_scheduler.add_job(func=scheduled_update_check, trigger="cron", hour=0, minute=0)
+cron_scheduler.start()
+
+# Shut down the scheduler when exiting the app
+atexit.register(lambda: cron_scheduler.shutdown())
+
 
 # ... (skipping constants) ...
 
@@ -198,14 +488,19 @@ def ocr_file_to_text(filepath: str) -> str:
         if ext == 'pdf':
             if convert_from_path is None:
                 raise Exception("Biblioteca pdf2image não disponível.")
-            # Lê 1ª página (normalmente cabeçalho está lá)
+            
+            # Read 1st page
             try:
-                pages = convert_from_path(filepath, first_page=1, last_page=2)
+                # Use configured Poppler path if available
+                kwargs = {}
+                if POPPLER_PATH:
+                    kwargs['poppler_path'] = POPPLER_PATH
+                
+                pages = convert_from_path(filepath, first_page=1, last_page=2, **kwargs)
                 for page in pages:
                     text += pytesseract.image_to_string(page) + "\n"
             except Exception as e:
-                print(f"Erro pdf2image: {e}")
-                # Fallback? Não há fallback fácil para pdf escaneado sem biblioteca externa
+                print(f"[OCR ERROR] pdf2image failed. Check Poppler path. Details: {e}")
                 return ""
         else:
             img = Image.open(filepath)
@@ -513,31 +808,52 @@ def parse_contribuinte(raw: str):
 
 @app.context_processor
 def inject_notifications():
-    if not current_user.is_authenticated:
-        return {}
-    
-    if current_user.role in ['admin', 'supervisor']:
-        conn = get_conn()
-        cur = conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM password_resets WHERE status='PENDENTE'")
-        count = cur.fetchone()[0]
-        conn.close()
-        return dict(reset_requests_count=count)
-    
-    
-    # Online Users (Active in last 5 min)
-    online_users = []
     try:
-        conn = get_conn()
-        cur = conn.cursor()
-        limit_time = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=5)).isoformat()
-        cur.execute("SELECT username, role, last_seen FROM users WHERE last_seen > ? ORDER BY last_seen DESC", (limit_time,))
-        online_users = [dict(row) for row in cur.fetchall()]
-        conn.close()
-    except Exception:
-        pass
+        if not current_user.is_authenticated:
+            return {}
+        
+        count = 0
+        # Check Resets
+        if current_user.role in ['admin', 'supervisor']:
+            try:
+                conn = get_conn()
+                cur = conn.cursor()
+                cur.execute("SELECT COUNT(*) FROM password_resets WHERE status='PENDENTE'")
+                r = cur.fetchone()
+                if r:
+                    count = r[0]
+                conn.close()
+            except Exception as e:
+                logging.error(f"Error checking password resets: {e}")
+        
+        # Online Users (Active in last 5 min)
+        online_users = []
+        try:
+            conn = get_conn()
+            cur = conn.cursor()
+            limit_time = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=5)).isoformat()
+            cur.execute("SELECT username, role, last_seen FROM users WHERE last_seen > ? ORDER BY last_seen DESC", (limit_time,))
+            online_users = [dict(row) for row in cur.fetchall()]
+            conn.close()
+        except Exception as e:
+            logging.error(f"Error checking online users: {e}")
 
-    return dict(reset_requests_count=count if current_user.role in ['admin', 'supervisor'] else 0, online_users=online_users)
+        # Update status (from global)
+        update_avail = False
+        if current_user.role in ['admin', 'supervisor']:
+            # Ensure UPDATE_STATE is read safely
+            global UPDATE_STATE
+            update_avail = UPDATE_STATE.get('available', False)
+
+        return dict(
+            reset_requests_count=count, 
+            online_users=online_users,
+            update_available=update_avail
+        )
+    except Exception as e:
+        logging.error(f"Critical error in context_processor: {e}")
+        # Return harmless empty dict to avoid 500
+        return {}
 
 @app.before_request
 def update_last_seen():
@@ -929,6 +1245,91 @@ def config_email():
 
     return render_template("config_email.html", config=config)
 
+
+@app.route("/atualizacoes", methods=["GET", "POST"])
+@login_required
+def atualizacoes():
+    if current_user.role not in ['admin', 'supervisor']:
+        flash("Acesso não autorizado.", "error")
+        return redirect(url_for('index'))
+    
+    global UPDATE_STATE
+    
+    changelog = []
+    current_version = updater.get_current_version_hash()
+    
+    if request.method == "POST":
+        action = request.form.get("action")
+        
+        if action == "check":
+            res = updater.check_for_updates()
+            if res and not res.get('error'):
+                UPDATE_STATE['available'] = res['update_available']
+                UPDATE_STATE['commits_behind'] = res['commits_behind']
+                UPDATE_STATE['last_check'] = datetime.now().isoformat()
+                
+                if res['update_available']:
+                    flash(f"Nova versão encontrada! {res['commits_behind']} commits atrás.", "info")
+                    changelog = res.get('changelog', [])
+                else:
+                    flash("O sistema já está atualizado.", "success")
+            else:
+                flash("Erro ao verificar atualizações.", "error")
+                
+        elif action == "update":
+            success, msg = updater.perform_update()
+            if success:
+                flash(f"Atualização realizada com sucesso! {msg}. Reinicie o servidor para aplicar.", "success")
+                # Reset state
+                UPDATE_STATE['available'] = False
+            else:
+                flash(f"Falha na atualização: {msg}", "error")
+            return redirect(url_for('atualizacoes'))
+
+    # If GET, try to get changelog if available
+    if UPDATE_STATE['available']:
+        # Fetch detailed info again to show log
+        res = updater.check_for_updates()
+        if res:
+            changelog = res.get('changelog', [])
+            
+    return render_template("atualizacoes.html", 
+                         state=UPDATE_STATE, 
+                         current_version=current_version,
+                         changelog=changelog)
+
+
+# ==============================
+# IAGO API (For Networked Learning)
+# ==============================
+
+@app.route("/api/iago/learn", methods=["POST"])
+# No login_required for now to simplify machine-to-machine, 
+# or use a shared secret if needed later. 
+# Ideally: @login_required but usage is typically automated.
+def api_iago_learn():
+    data = request.json
+    if not data:
+        return {"error": "No data"}, 400
+        
+    full_text = data.get("full_text")
+    current_data = data.get("current_data")
+    
+    # We call the LOCAL iago.learn logic
+    # Note: On the server, iago should use local DB or IAGO_DB_PATH
+    count = iago.learn(full_text, current_data)
+    
+    return {"status": "ok", "learned_count": count}
+
+@app.route("/api/iago/analyze", methods=["POST"])
+def api_iago_analyze():
+    data = request.json
+    full_text = data.get("full_text")
+    
+    # We call LOCAL iago.analyze
+    result = iago.analyze(full_text)
+    
+    return result
 
 @app.route("/usuarios", methods=["GET", "POST"])
 @login_required

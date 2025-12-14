@@ -1,27 +1,44 @@
 @echo off
-echo ===========================================
-echo   Iniciando Processo de Empacotamento
-echo ===========================================
-
-echo [1/5] Instalando PyInstaller e Dependencias...
-pip install pyinstaller pywin32 tk
-
-echo [2/5] Gerando Executavel do Servidor (Aplicacao)...
-pyinstaller --noconfirm --onedir --windowed --name "IndicadorRealServer" --add-data "templates;templates" --add-data "static;static" --hidden-import "imoveis_web" --hidden-import "email_service" server_gui.py
-
-echo [3/5] Preparando Payload...
-REM Create a clean db template if not exists
-python create_clean_db.py
-move imoveis.db dist\IndicadorRealServer\clean.db.template
-
-REM Zip the IndicadorRealServer folder to payload.zip
-powershell Compress-Archive -Path dist\IndicadorRealServer\* -DestinationPath dist\payload.zip -Force
-
-echo [4/5] Gerando Instalador...
-pyinstaller --noconfirm --onefile --windowed --name "Instalador_IndicadorReal" --add-data "dist/payload.zip;." setup_installer.py
-
-echo [5/5] Limpeza e Finalizacao...
+echo ===================================================
+echo     GERADOR DE INSTALADOR MESTRE (BUNDLE)
+echo ===================================================
 echo.
-echo Processo Concluido!
-echo O instalador esta em: dist\Instalador_IndicadorReal.exe
+echo 1. Preparando arquivos...
+if exist "staging" rmdir /s /q "staging"
+mkdir "staging"
+
+if not exist "dist\Indicador Server.exe" (
+    echo [ERRO] 'Indicador Server.exe' nao encontrado na pasta dist!
+    echo Compile o servidor primeiro.
+    pause
+    exit
+)
+copy "dist\Indicador Server.exe" "staging\"
+copy "dist\Setup Wizard.exe" "staging\"
+
+echo.
+echo 2. Verificando Assets...
+if not exist "installer_assets" (
+    echo [ERRO] A pasta 'installer_assets' nao existe!
+    pause
+    exit
+)
+echo Verificando arquivos em installer_assets...
+dir installer_assets
+
+echo.
+echo 3. Compilando 'Instalador Completo v4.exe'...
+echo Isso pode levar alguns minutos...
+pyinstaller --noconfirm --onefile --windowed --name "Instalador Completo v4" --icon "icon.ico" --add-data "staging;dist_bundle" --add-data "installer_assets;installer_assets" master_setup.py
+
+echo.
+echo Limpando staging...
+rmdir /s /q "staging"
+
+echo.
+echo ===================================================
+echo                  CONCLUIDO!
+echo ===================================================
+echo O arquivo final esta em: dist/Instalador Completo.exe
+echo.
 pause

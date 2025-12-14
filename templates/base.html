@@ -57,6 +57,16 @@
                     </a>
                 </li>
                 <li>
+                    <a href="{{ url_for('atualizacoes') }}"
+                        class="nav-link text-white {{ 'active' if request.endpoint == 'atualizacoes' }}">
+                        <i class="bi bi-cloud-arrow-down"></i>
+                        Atualizações
+                        {% if update_available %}
+                        <span class="badge bg-danger ms-2" style="font-size: 0.6em;">Novo</span>
+                        {% endif %}
+                    </a>
+                </li>
+                <li>
                     <a href="{{ url_for('exportar_json') }}" class="nav-link text-white">
                         <i class="bi bi-file-earmark-code"></i>
                         Exportar JSON
@@ -84,7 +94,7 @@
                     Part. Especial: Lucas Ribeiro.
                 </div>
                 <div class="mb-2">
-                    Uso exclusivo: Cartório 2º Ofício de Manacapuru.
+                    Uso exclusivo: {{ cartorio_name }}.
                 </div>
                 <div>
                     <a href="{{ url_for('privacidade') }}" class="text-white-50 text-decoration-none">Privacidade</a>

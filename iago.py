@@ -1,22 +1,63 @@
+
+from dotenv import load_dotenv
 import sqlite3
 import re
 import os
 from datetime import datetime
 
-IA_DB_PATH = "ia.db"
+# Load .env file
+load_dotenv()
+
+
+
+try:
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+except ImportError:
+    psycopg2 = None
+
+# DB Configuration
+IAGO_DB_TYPE = os.getenv("IAGO_DB_TYPE", "sqlite") # 'sqlite' or 'postgres'
+IAGO_DB_URL = os.getenv("IAGO_DB_URL", "") # e.g. "postgresql://user:pass@host/db"
+IA_DB_PATH = os.getenv("IAGO_DB_PATH", "ia.db")
+
+print(f"[IAGO] DB Type: {IAGO_DB_TYPE}")
+if IAGO_DB_TYPE == 'sqlite':
+    print(f"[IAGO] Path: {os.path.abspath(IA_DB_PATH)}")
 
 def get_ia_conn():
+    if IAGO_DB_TYPE == 'postgres':
+        if not psycopg2:
+            raise ImportError("psycopg2 is required for Postgres usage. pip install psycopg2-binary")
+        return psycopg2.connect(IAGO_DB_URL)
+        
+    # Default SQLite
+    db_dir = os.path.dirname(IA_DB_PATH)
+    if db_dir and not os.path.exists(db_dir):
+        os.makedirs(db_dir, exist_ok=True)
     conn = sqlite3.connect(IA_DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
+def execute_query(cur, sql, params=()):
+    """Helper to handle placeholder differences (sqlite: ?, postgres: %s)"""
+    if IAGO_DB_TYPE == 'postgres':
+        # Convert ? to %s for postgres
+        sql = sql.replace('?', '%s')
+    cur.execute(sql, params)
+
 def init_ia_db():
     conn = get_ia_conn()
     cur = conn.cursor()
-    # Patterns table: Stores regexes learned for specific fields
-    cur.execute("""
+    
+    # Schema adaption
+    pk_def = "INTEGER PRIMARY KEY AUTOINCREMENT"
+    if IAGO_DB_TYPE == 'postgres':
+        pk_def = "SERIAL PRIMARY KEY"
+        
+    cur.execute(f"""
         CREATE TABLE IF NOT EXISTS patterns (
-            id INTEGER PRIMARY KEY,
+            id {pk_def},
             field_name TEXT NOT NULL,
             regex_pattern TEXT NOT NULL,
             example_match TEXT,
@@ -27,157 +68,121 @@ def init_ia_db():
     conn.commit()
     conn.close()
 
-def clean_text_for_regex(text):
-    """Escapes regex special characters."""
-    return re.escape(text)
-
-def generate_context_regex(full_text, value, context_words=3):
-    r"""
-    Finds 'value' in 'full_text' and generates a regex based on preceding words.
-    Example: "Matrícula número 12345" -> value="12345"
-    Context: "Matrícula número"
-    Regex: r"Matrícula\s+número\s+(\d+)"
-    """
-    if not value or len(value) < 2:
-        return None
-        
-    # Normalize
-    value_clean = value.strip()
-    
-    # Locate value in text
-    # We use re.escape to find the exact string
-    escaped_value = re.escape(value_clean)
-    
-    # Try to find match
-    matches = list(re.finditer(escaped_value, full_text))
-    if not matches:
-        return None
-        
-    # Pick the first match for simplicity (or simplistic approach)
-    match = matches[0]
-    start, end = match.span()
-    
-    # Get context (preceding text)
-    # Go back N characters looking for words
-    preceding_chunk = full_text[max(0, start-50):start]
-    
-    # Split into words/tokens
-    tokens = preceding_chunk.split()
-    if not tokens:
-        return None
-        
-    # Take last N tokens as context
-    context_tokens = tokens[-context_words:]
-    
-    # Build regex pattern
-    # Escape tokens but allow whitespace between them
-    pattern_parts = [re.escape(t) for t in context_tokens]
-    
-    # The pattern: Context words + optional separator + CAPTURING GROUP (value)
-    # We try to make the capturing group generic based on value type
-    # If value is digits: (\d+)
-    # If alphanumeric: (.+) ? Too broad. Let's start with strict capture.
-    
-    # Detecting matching group type
-    if value_clean.isdigit():
-        capture_group = r"(\d+)"
-    elif re.match(r"^\d+[\.,]\d+$", value_clean): # formatting number
-        capture_group = r"([\d\.,]+)"
-    else:
-        # Fallback to mostly safe characters, stopping at newline
-        capture_group = r"([^\n]+)"
-        
-    # Join context
-    context_regex = r"\s+".join(pattern_parts)
-    
-    # Final Regex
-    # Case insensitive flag (?i) at start
-    full_regex = rf"(?i){context_regex}\s*[:.\-]?\s*{capture_group}"
-    
-    return full_regex
+# ... (rest of imports/helpers)
 
 def learn(full_text, current_data):
-    """
-    Analyzes current_data against full_text to learn patterns.
-    current_data: dict of field -> value
-    """
     if not full_text:
         return 0
         
-    conn = get_ia_conn()
-    cur = conn.cursor()
-    count = 0
-    now = datetime.now().isoformat()
-    
-    # Fields intended for IAGO
-    target_fields = [
-        "NUMERO_REGISTRO", "NOME_LOGRADOURO", "BAIRRO", 
-        "CIDADE", "LOTE", "QUADRA", "SETOR"
-    ]
-    
-    for field in target_fields:
-        # Check map keys (case insensitive or direct)
-        # Assuming current_data keys are matching target_fields or lowercase
-        val = current_data.get(field) or current_data.get(field.lower())
+    # --- API MODE (Client) ---
+    if IAGO_SERVER_URL:
+        # ... (Client code unchanged) ...
+        try:
+            payload = {"full_text": full_text, "current_data": current_data}
+            resp = requests.post(f"{IAGO_SERVER_URL}/api/iago/learn", json=payload, timeout=5)
+            if resp.status_code == 200:
+                return resp.json().get('learned_count', 0)
+            return 0
+        except Exception as e:
+            print(f"[IAGO CLIENT ERROR] Learn failed: {e}")
+            return 0
+
+    # --- SERVER/LOCAL MODE (DB Access) ---
+    try:
+        conn = get_ia_conn()
+        cur = conn.cursor()
+        count = 0
+        now = datetime.now().isoformat()
         
-        if val:
-            val_str = str(val).strip()
-            regex = generate_context_regex(full_text, val_str)
+        target_fields = [
+            "NUMERO_REGISTRO", "NOME_LOGRADOURO", "BAIRRO", 
+            "CIDADE", "LOTE", "QUADRA", "SETOR"
+        ]
+        
+        for field in target_fields:
+            val = current_data.get(field) or current_data.get(field.lower())
             
-            if regex:
-                # Check if exists
-                cur.execute("SELECT id, weight FROM patterns WHERE field_name=? AND regex_pattern=?", (field, regex))
-                existing = cur.fetchone()
+            if val:
+                val_str = str(val).strip()
+                regex = generate_context_regex(full_text, val_str)
                 
-                if existing:
-                    # Reinforce
-                    cur.execute("UPDATE patterns SET weight = weight + 1 WHERE id=?", (existing['id'],))
-                else:
-                    # Learn new
-                    # Privacy Update: Do NOT store the actual value (val_str) in the AI DB.
-                    # Store a generic placeholders or the regex signature to ensure no PII leaks if DB is shared.
-                    anonymized_example = f"Pattern for {field}" 
-                    cur.execute("INSERT INTO patterns (field_name, regex_pattern, example_match, created_at) VALUES (?, ?, ?, ?)",
-                                (field, regex, anonymized_example, now))
-                    count += 1
-    
-    conn.commit()
-    conn.close()
-    return count
+                if regex:
+                    # Check
+                    execute_query(cur, "SELECT id, weight FROM patterns WHERE field_name=? AND regex_pattern=?", (field, regex))
+                    existing = None
+                    if IAGO_DB_TYPE == 'postgres':
+                        # Postgres cursor might behave differently depending on factory
+                        # but standard psycopg2 cursor fetches tuples or RealDictRow
+                        existing = cur.fetchone()
+                    else:
+                         existing = cur.fetchone()
+
+                    if existing:
+                        # Reinforce
+                        # Handle row access difference if simple tuple
+                        row_id = existing['id'] if hasattr(existing, 'keys') else existing[0]
+                        execute_query(cur, "UPDATE patterns SET weight = weight + 1 WHERE id=?", (row_id,))
+                    else:
+                        # Learn
+                        anonymized_example = f"Pattern for {field}" 
+                        execute_query(cur, "INSERT INTO patterns (field_name, regex_pattern, example_match, created_at) VALUES (?, ?, ?, ?)",
+                                    (field, regex, anonymized_example, now))
+                        count += 1
+        
+        conn.commit()
+        conn.close()
+        return count
+    except Exception as e:
+        print(f"[IAGO DB ERROR] Learn: {e}")
+        return 0
 
 def analyze(full_text):
     """
     Applies learned patterns to text.
-    Returns dict of extracted fields.
     """
     if not full_text:
         return {}
-        
-    conn = get_ia_conn()
-    cur = conn.cursor()
-    # Get all patterns ordered by weight desc
-    cur.execute("SELECT field_name, regex_pattern FROM patterns ORDER BY weight DESC")
-    rows = cur.fetchall()
-    conn.close()
-    
-    results = {}
-    
-    for r in rows:
-        field = r["field_name"]
-        # Skip if we already found a high-confidence match? 
-        # For now, let's keep the first match (highest weight)
-        if field in results:
-            continue
-            
-        pattern = r["regex_pattern"]
+
+    # --- API MODE ---
+    if IAGO_SERVER_URL:
         try:
-            match = re.search(pattern, full_text)
-            if match:
-                # Group 1 is the value
-                val = match.group(1).strip()
-                results[field] = val
-        except re.error:
-            # Bad regex from bad learning? Ignore
-            pass
-            
-    return results
+            payload = {"full_text": full_text}
+            # We ask server to analyze
+            resp = requests.post(f"{IAGO_SERVER_URL}/api/iago/analyze", json=payload, timeout=5)
+            if resp.status_code == 200:
+                return resp.json()
+            return {}
+        except Exception as e:
+            print(f"[IAGO CLIENT ERROR] Analyze failed: {e}")
+            return {}
+        
+
+    # --- SERVER/LOCAL MODE (DB Access) ---
+    try:
+        conn = get_ia_conn()
+        cur = conn.cursor()
+        execute_query(cur, "SELECT field_name, regex_pattern FROM patterns ORDER BY weight DESC")
+        rows = cur.fetchall()
+        conn.close()
+        
+        results = {}
+        
+        for r in rows:
+            # Handle row access difference
+            field = r["field_name"] if hasattr(r, 'keys') else r[0]
+            if field in results:
+                continue
+                
+            pattern = r["regex_pattern"] if hasattr(r, 'keys') else r[1]
+            try:
+                match = re.search(pattern, full_text)
+                if match:
+                    val = match.group(1).strip()
+                    results[field] = val
+            except re.error:
+                pass
+                
+        return results
+    except Exception as e:
+        print(f"[IAGO DB ERROR] Analyze: {e}")
+        return {}

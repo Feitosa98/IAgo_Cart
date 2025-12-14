@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block conteudo %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h2 class="text-primary fw-bold">
+            <i class="bi bi-cloud-arrow-down me-2"></i> Atualizações do Sistema
+        </h2>
+        <p class="text-secondary">Gerencie as versões e atualizações do sistema IAGO/WebONR.</p>
+    </div>
+</div>
+
+<div class="row justify-content-center">
+    <!-- Status Card -->
+    <div class="col-md-8">
+        <div class="card shadow-sm mb-4">
+            <div class="card-header bg-white py-3">
+                <h5 class="mb-0 fw-bold">Status da Versão</h5>
+            </div>
+            <div class="card-body text-center py-5">
+
+                {% if state.available %}
+                <div class="mb-4">
+                    <i class="bi bi-exclamation-circle text-warning display-1"></i>
+                </div>
+                <h3 class="fw-bold mb-3">Nova Versão Disponível!</h3>
+                <p class="text-muted mb-4">
+                    Sua versão atual é <span class="badge bg-secondary">{{ current_version }}</span>.
+                    O sistema está <strong>{{ state.commits_behind }} commits</strong> atrás da versão mais recente.
+                </p>
+
+                {% if changelog %}
+                <div class="text-start bg-light p-3 rounded mb-4" style="max-height: 200px; overflow-y: auto;">
+                    <h6 class="fw-bold mb-2">O que há de novo:</h6>
+                    <ul class="list-unstyled mb-0 small">
+                        {% for log in changelog %}
+                        <li class="mb-1 text-secondary font-monospace">{{ log }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endif %}
+
+                <form action="{{ url_for('atualizacoes') }}" method="POST" class="d-inline">
+                    <input type="hidden" name="action" value="update">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-success btn-lg px-5 shadow-sm"
+                        onclick="return confirm('Isso irá baixar as atualizações e pode exigir reinicialização manual se o servidor não o fizer automaticamente. Continuar?')">
+                        <i class="bi bi-download me-2"></i> Baixar e Atualizar Agora
+                    </button>
+                </form>
+
+                {% else %}
+                <div class="mb-4">
+                    <i class="bi bi-check-circle text-success display-1"></i>
+                </div>
+                <h3 class="fw-bold mb-3">Seu sistema está atualizado</h3>
+                <p class="text-muted mb-4">
+                    Versão atual: <span class="badge bg-success">{{ current_version }}</span>
+                </p>
+                <p class="small text-muted">Última verificação: {{ state.last_check if state.last_check else 'Nunca' }}
+                </p>
+                {% endif %}
+
+            </div>
+            <div class="card-footer bg-light text-end">
+                <form action="{{ url_for('atualizacoes') }}" method="POST" class="d-inline">
+                    <input type="hidden" name="action" value="check">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-outline-primary btn-sm">
+                        <i class="bi bi-arrow-clockwise me-1"></i> Verificar Novamente
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
