@@ -968,6 +968,32 @@ def privacidade():
 def termos():
     return render_template("termos.html")
 
+@app.route("/task_status/<task_id>")
+@login_required
+def task_status(task_id):
+    task = process_upload_task.AsyncResult(task_id)
+    response = {
+        "state": task.state,
+    }
+    
+    if task.state == 'PENDING':
+        # Job not started yet
+        response['status'] = 'Pending...'
+    elif task.state != 'FAILURE':
+        # PENDING or SUCCESS or STARTED
+        # If custom state logic was implemented, we could read task.info.
+        # For now, we only care about result if SUCCESS
+        if task.state == 'SUCCESS':
+            response['result'] = task.result
+            # task.result is the return value of the function
+            # {"status": "success"/"duplicate"/"error", "matricula": "...", ...}
+            
+    else:
+        # FAILURE
+        response['error'] = str(task.info) # Exception info
+        
+    return jsonify(response)
+
 @celery.task(bind=True)
 def process_upload_task(self, filename, filepath, tenant_schema, overwrite=False):
     """

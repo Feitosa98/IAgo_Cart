@@ -154,48 +154,67 @@
                 method: 'POST',
                 body: formData
             })
-                .then(async response => {
-                    const text = await response.text();
-                    try {
-                        const data = JSON.parse(text);
-                        if (!response.ok) {
-                            // If 403 or 500 but returned JSON error
-                            throw new Error(data.message || data.error || "Erro no servidor");
-                        }
-                        if (data.status === 'success') {
-                            addResult(file.name, "Sucesso", data.matricula, "Importado");
-                            resolve();
-                        } else if (data.status === 'duplicate') {
-                            // Trigger Modal
-                            showDuplicateModal(data.matricula, file).then(shouldOverwrite => {
-                                if (shouldOverwrite) {
-                                    // Recursive retry with overwrite
-                                    uploadFile(file, true).then(resolve).catch(reject);
-                                } else {
-                                    addResult(file.name, "Ignorado", data.matricula, "Duplicada mantida");
-                                    resolve();
-                                }
-                            });
-                        } else {
-                            addResult(file.name, "Erro", "-", data.message || "Erro desconhecido");
-                            resolve();
-                        }
-                    } catch (e) {
-                        console.error("JSON Parse Error:", e);
-                        console.error("Raw Response:", text);
-                        // Check if it's HTML (likely login or error page)
-                        if (text.trim().startsWith("<")) {
-                            addResult(file.name, "Erro", "-", "Sessão expirada ou erro. Recarregue a página.");
-                        } else {
-                            addResult(file.name, "Erro", "-", "Resposta inválida do servidor: " + text.substring(0, 50));
-                        }
+            .then(async response => {
+                const text = await response.text();
+                try {
+                    const data = JSON.parse(text);
+                    if (!response.ok) throw new Error(data.message || "Erro no servidor");
+                    
+                    if (data.status === 'success' && data.task_id) {
+                        // Start Polling
+                        pollTask(data.task_id, file, resolve, reject);
+                    } else {
+                        // Immediate error or unexpected success without task
+                         addResult(file.name, "Erro", "-", data.message || "Erro desconhecido");
+                         resolve();
+                    }
+                } catch (e) {
+                    addResult(file.name, "Erro", "-", "Erro na resposta: " + e.message);
+                    resolve();
+                }
+            })
+            .catch(reject);
+        });
+    }
+
+    function pollTask(taskId, file, resolve, reject) {
+        const interval = setInterval(async () => {
+            try {
+                const res = await fetch(`/task_status/${taskId}`);
+                const data = await res.json();
+
+                if (data.state === 'SUCCESS') {
+                    clearInterval(interval);
+                    const result = data.result;
+                    
+                    if (result.status === 'success') {
+                        addResult(file.name, "Sucesso", result.matricula, "Processado");
+                        resolve();
+                    } else if (result.status === 'duplicate') {
+                        // SHOW DUPLICATE MODAL
+                        showDuplicateModal(result.matricula, file).then(shouldOverwrite => {
+                            if (shouldOverwrite) {
+                                uploadFile(file, true).then(resolve).catch(reject);
+                            } else {
+                                addResult(file.name, "Ignorado", result.matricula, "Duplicada mantida");
+                                resolve();
+                            }
+                        });
+                    } else {
+                        addResult(file.name, "Erro", "-", result.error || "Erro no processamento");
                         resolve();
                     }
-                })
-                .catch(err => {
-                    reject(err);
-                });
-        });
+                } else if (data.state === 'FAILURE') {
+                    clearInterval(interval);
+                    addResult(file.name, "Erro", "-", data.error || "Falha na tarefa");
+                    resolve();
+                }
+                // If PENDING or STARTED, continue polling
+            } catch (err) {
+                console.error("Polling error", err);
+                // Don't clear interval immediately on network blip, but maybe limit retries?
+            }
+        }, 1500); // Check every 1.5s
     }
 
     function showDuplicateModal(matricula, file) {
