@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block conteudo %}
+<div class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2 class="fw-bold mb-0">Gestão de Matrículas</h2>
+            <p class="text-muted small mb-0">Visualize e exporte suas matrículas.</p>
+        </div>
+        <div>
+            <a href="{{ url_for('exportar_concluidos') }}" class="btn btn-primary">
+                <i class="bi bi-box-seam me-2"></i>Baixar Tudo (Organizado)
+            </a>
+        </div>
+    </div>
+
+    <div class="card border-0 shadow-sm">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="bg-light">
+                        <tr>
+                            <th class="ps-4">Registro</th>
+                            <th>Endereço</th>
+                            <th>Status</th>
+                            <th>Última Atualização</th>
+                            <th class="text-end pe-4">Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% if imoveis %}
+                        {% for i in imoveis %}
+                        <tr>
+                            <td class="ps-4 fw-medium">#{{ i.numero_registro }}</td>
+                            <td class="text-muted">{{ i.endereco }}</td>
+                            <td>
+                                {% if i.status == 'CONCLUIDO' %}
+                                <span class="badge bg-success bg-opacity-10 text-success">Concluído</span>
+                                {% elif i.status == 'PENDENTE' %}
+                                <span class="badge bg-warning bg-opacity-10 text-warning">Pendente</span>
+                                {% else %}
+                                <span class="badge bg-secondary bg-opacity-10 text-secondary">{{ i.status }}</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-muted small">{{ i.updated_at }}</td>
+                            <td class="text-end pe-4">
+                                <a href="{{ url_for('editar', id=i.id) }}" class="btn btn-sm btn-light border">
+                                    <i class="bi bi-pencil"></i>
+                                </a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                        {% else %}
+                        <tr>
+                            <td colspan="5" class="text-center py-5 text-muted">
+                                <i class="bi bi-inbox fs-1 d-block mb-3"></i>
+                                Nenhuma matrícula encontrada.
+                            </td>
+                        </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

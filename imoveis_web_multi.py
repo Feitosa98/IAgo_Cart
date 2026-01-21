@@ -1,6 +1,9 @@
 import sqlite3
 import json
 from datetime import datetime, timedelta, timezone
+import secrets
+from workalendar.america import Brazil
+from export_service import ExportService
 import os
 import sys
 import re
@@ -1408,11 +1411,64 @@ def config_email():
     return render_template("config_email.html", config=config)
 
 
+
+@app.route("/matriculas")
+@login_required
+def matriculas():
+    conn = get_conn()
+    cur = conn.cursor()
+    
+    # Simple list of all imoveis
+    # In production, this should have pagination!
+    cur.execute("""
+        SELECT id, numero_registro, nome_logradouro, bairro, status_trabalho, updated_at
+        FROM imoveis
+        ORDER BY updated_at DESC
+        LIMIT 500
+    """)
+    rows = cur.fetchall()
+    conn.close()
+    
+    lista = []
+    for r in rows:
+        lista.append({
+            "id": r[0],
+            "numero_registro": r[1],
+            "endereco": f"{r[2]} - {r[3]}",
+            "status": r[4],
+            "updated_at": r[5]
+        })
+        
+    return render_template("matriculas.html", imoveis=lista)
+
+@app.route("/matriculas/exportar")
+@login_required
+def exportar_concluidos():
+    # Only allow Admin/Supervisor or anyone? Let's allow anyone authenticated for now.
+    tenant = session.get('tenant_schema', 'tenant_default')
+    
+    zip_buffer, error = ExportService.generate_organized_zip(tenant, current_user.id)
+    
+    if error:
+        flash(f"Erro ao gerar exportação: {error}", "error")
+        return redirect(url_for('matriculas'))
+        
+    if not zip_buffer:
+        flash("Arquivo vazio ou erro desconhecido.", "error")
+        return redirect(url_for('matriculas'))
+        
+    return send_file(
+        zip_buffer,
+        mimetype='application/zip',
+        as_attachment=True,
+        download_name=f'matriculas_concluidas_{datetime.now().strftime("%Y%m%d")}.zip'
+    )
+
 @app.route("/atualizacoes", methods=["GET", "POST"])
 @login_required
 def atualizacoes():
     if current_user.role not in ['admin', 'supervisor']:
-        flash("Acesso não autorizado.", "error")
+        flash("Acesso negado.", "error")
         return redirect(url_for('index'))
     
     global UPDATE_STATE

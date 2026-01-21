@@ -31,7 +31,13 @@
                         Início
                     </a>
                 </li>
-
+                <li class="nav-item">
+                    <a href="{{ url_for('matriculas') }}"
+                        class="nav-link text-white {{ 'active' if request.endpoint == 'matriculas' }}">
+                        <i class="bi bi-collection"></i>
+                        Matrículas
+                    </a>
+                </li>
                 {% if current_user.role in ['admin', 'supervisor'] %}
                 <li class="nav-item">
                     <a href="{{ url_for('dashboard') }}"

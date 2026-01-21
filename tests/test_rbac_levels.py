@@ -86,6 +86,8 @@ def configure_mock_user(mock_cursor, username, role, password="123"):
                 d = {'username': 'admin', 'role': 'admin', 'last_seen': '2025-01-01'}
                 t = ('admin', 'admin', '2025-01-01')
                 return [MockRow(d, t)]
+            if "FROM system_config" in sql:
+                return []
         return []
 
     mock_cursor.fetchall.side_effect = smart_fetchall
