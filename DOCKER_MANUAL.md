@@ -8,7 +8,17 @@ Certifique-se de ter instalado em sua máquina:
 *   **Docker Desktop** (Windows/Mac) ou **Docker Engine** (Linux)
 *   **Git** (para clonar o repositório)
 
-## 2. Configuração Inicial
+## 2. Instalação e Configuração
+
+### 2.1. Clonar o Repositório
+Abra o seu terminal ou PowerShell e rode o comando:
+
+```bash
+git clone https://github.com/Feitosa98/IAgo_Cart.git
+cd IAgo_Cart
+```
+
+### 2.2. Configuração de Ambiente
 
 Antes de subir os containers, você precisa configurar as variáveis de ambiente.
 
