@@ -60,6 +60,22 @@ class ExportService:
                             zf.write(file_path, archive_name)
                             added_count += 1
                             
+                        elif ext in ['.jpg', '.jpeg', '.png', '.bmp']:
+                            # Converte Imagem para TIFF
+                            try:
+                                with Image.open(file_path) as img:
+                                    temp_tiff_path = os.path.join(temp_dir, f"{safe_reg_num}.tif")
+                                    # Convert to RGB (in case of RGBA/P) before saving if needed, 
+                                    # but TIFF handles most. Let's just save.
+                                    # Simple save as TIFF
+                                    img.save(temp_tiff_path, compression="tiff_deflate")
+                                    
+                                    zf.write(temp_tiff_path, archive_name)
+                                    added_count += 1
+                            except Exception as img_err:
+                                print(f"Erro ao converter imagem {file_path}: {img_err}")
+                                continue
+
                         elif ext == '.pdf':
                             # Converte PDF para TIFF Multipage
                             try:
