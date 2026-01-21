@@ -2600,5 +2600,5 @@ if __name__ == "__main__":
     except Exception:
         print("Não foi possível detectar IP rede local. Acesse via localhost.")
 
-    app.run(host="0.0.0.0", port=5005, debug=False)
+    app.run(host="0.0.0.0", port=5000, debug=False)
 
