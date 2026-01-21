@@ -20,3 +20,7 @@ task.md
 implementation_plan.md
 walkthrough.md
 tests/
+.coverage
+htmlcov/
+.pytest_cache/
+.env

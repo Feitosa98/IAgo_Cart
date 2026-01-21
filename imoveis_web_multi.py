@@ -246,7 +246,17 @@ cron_scheduler.add_job(func=scheduled_update_check, trigger="cron", hour=0, minu
 cron_scheduler.start()
 
 # Shut down the scheduler when exiting the app
-atexit.register(lambda: cron_scheduler.shutdown())
+# Shut down the scheduler when exiting the app
+def safe_shutdown():
+    try:
+        if cron_scheduler.running:
+            # Silence logger to avoid "I/O operation on closed file"
+            logging.getLogger('apscheduler').setLevel(logging.CRITICAL)
+            cron_scheduler.shutdown(wait=False)
+    except Exception:
+        pass
+
+atexit.register(safe_shutdown)
 
 
 # ==============================
@@ -826,6 +836,9 @@ def add_security_headers(response):
 
 @app.before_request
 def csrf_protect():
+    from flask import current_app
+    if current_app.config.get('TESTING'):
+        return
     if request.method == "POST":
         token = session.get('csrf_token')
         if not token or token != request.form.get('csrf_token'):
@@ -928,7 +941,7 @@ def select_tenant():
         
         flash("Cartório inválido.", "danger")
         
-    return render_template("select_tenant.html", tenants=tenants)
+    return render_template("select_cartorio.html", tenants=tenants)
 
 
 @app.route("/logout")

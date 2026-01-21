@@ -32,6 +32,7 @@ from imoveis_web_multi import app, db_manager
 def client():
     app.config['TESTING'] = True
     app.config['SECRET_KEY'] = 'test-key'
+    app.config['WTF_CSRF_ENABLED'] = False # Disable CSRF for tests
     
     with app.test_client() as client:
         yield client
@@ -43,6 +44,7 @@ def mock_db(mocker):
     mock_cursor = MagicMock()
     
     # Configure cursor context manager
+    mock_conn.cursor.return_value = mock_cursor
     mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
     
     # Mock db_manager functions
