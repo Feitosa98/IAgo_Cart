@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    ports:
+      - "5000:5000"
+    volumes:
+      - .:/app
+      - ./uploads:/app/uploads
+    environment:
+      - IAGO_DB_URL=postgresql://postgres:postgres@db:5432/indicador_real
+      - SECRET_KEY=dev-secret-key-docker
+      - TESSERACT_CMD=tesseract
+      - POPPLER_PATH=/usr/bin
+    depends_on:
+      - db
+    restart: always
+
+  db:
+    image: postgres:15
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=indicador_real
+    ports:
+      - "5432:5432"
+    restart: always
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    restart: always
+
+  worker:
+    build: .
+    command: celery -A celery_worker.celery worker --loglevel=info
+    volumes:
+      - .:/app
+      - ./uploads:/app/uploads
+    environment:
+      - IAGO_DB_URL=postgresql://postgres:postgres@db:5432/indicador_real
+      - SECRET_KEY=dev-secret-key-docker
+      - TESSERACT_CMD=tesseract
+      - POPPLER_PATH=/usr/bin
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      - web
+      - redis
+      - db
+    restart: always
+
+volumes:
+  postgres_data:

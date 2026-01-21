@@ -4,60 +4,47 @@ import sqlite3
 import re
 import os
 from datetime import datetime
+import requests
+
 
 # Load .env file
 load_dotenv()
 
+IAGO_SERVER_URL = os.getenv("IAGO_SERVER_URL")
 
+import db_manager
 
-try:
-    import psycopg2
-    from psycopg2.extras import RealDictCursor
-except ImportError:
-    psycopg2 = None
-
-# DB Configuration
-IAGO_DB_TYPE = os.getenv("IAGO_DB_TYPE", "sqlite") # 'sqlite' or 'postgres'
-IAGO_DB_URL = os.getenv("IAGO_DB_URL", "") # e.g. "postgresql://user:pass@host/db"
-IA_DB_PATH = os.getenv("IAGO_DB_PATH", "ia.db")
-
-print(f"[IAGO] DB Type: {IAGO_DB_TYPE}")
-if IAGO_DB_TYPE == 'sqlite':
-    print(f"[IAGO] Path: {os.path.abspath(IA_DB_PATH)}")
+# ...
 
 def get_ia_conn():
-    if IAGO_DB_TYPE == 'postgres':
-        if not psycopg2:
-            raise ImportError("psycopg2 is required for Postgres usage. pip install psycopg2-binary")
-        return psycopg2.connect(IAGO_DB_URL)
+    # Use Shared Cloud DB from db_manager
+    conn = db_manager.get_compat_conn()
+    
+    # Set Schema to IAGO
+    try:
+        cur = conn.conn.cursor()
+        cur.execute("SET search_path TO iago, public")
+        cur.close()
+        conn.commit()
+    except Exception as e:
+        print(f"[IAGO DB ERROR] Failed to set schema: {e}")
         
-    # Default SQLite
-    db_dir = os.path.dirname(IA_DB_PATH)
-    if db_dir and not os.path.exists(db_dir):
-        os.makedirs(db_dir, exist_ok=True)
-    conn = sqlite3.connect(IA_DB_PATH)
-    conn.row_factory = sqlite3.Row
     return conn
 
-def execute_query(cur, sql, params=()):
-    """Helper to handle placeholder differences (sqlite: ?, postgres: %s)"""
-    if IAGO_DB_TYPE == 'postgres':
-        # Convert ? to %s for postgres
-        sql = sql.replace('?', '%s')
-    cur.execute(sql, params)
+
 
 def init_ia_db():
     conn = get_ia_conn()
     cur = conn.cursor()
     
-    # Schema adaption
-    pk_def = "INTEGER PRIMARY KEY AUTOINCREMENT"
-    if IAGO_DB_TYPE == 'postgres':
-        pk_def = "SERIAL PRIMARY KEY"
-        
-    cur.execute(f"""
+    # Postgres Schema
+    # We rely on setup_cloud_db.py generally, but this is safe to keep
+    # Note: cur is wrapped, so ? is replaced.
+    # But for DDL, ? is not used.
+    
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS patterns (
-            id {pk_def},
+            id SERIAL PRIMARY KEY,
             field_name TEXT NOT NULL,
             regex_pattern TEXT NOT NULL,
             example_match TEXT,
@@ -67,6 +54,7 @@ def init_ia_db():
     """)
     conn.commit()
     conn.close()
+
 
 # ... (rest of imports/helpers)
 
@@ -86,6 +74,7 @@ def learn(full_text, current_data):
         except Exception as e:
             print(f"[IAGO CLIENT ERROR] Learn failed: {e}")
             return 0
+
 
     # --- SERVER/LOCAL MODE (DB Access) ---
     try:
@@ -108,24 +97,21 @@ def learn(full_text, current_data):
                 
                 if regex:
                     # Check
-                    execute_query(cur, "SELECT id, weight FROM patterns WHERE field_name=? AND regex_pattern=?", (field, regex))
-                    existing = None
-                    if IAGO_DB_TYPE == 'postgres':
-                        # Postgres cursor might behave differently depending on factory
-                        # but standard psycopg2 cursor fetches tuples or RealDictRow
-                        existing = cur.fetchone()
-                    else:
-                         existing = cur.fetchone()
+                    cur.execute("SELECT id, weight FROM patterns WHERE field_name=? AND regex_pattern=?", (field, regex))
+                    existing = cur.fetchone()
 
                     if existing:
                         # Reinforce
-                        # Handle row access difference if simple tuple
-                        row_id = existing['id'] if hasattr(existing, 'keys') else existing[0]
-                        execute_query(cur, "UPDATE patterns SET weight = weight + 1 WHERE id=?", (row_id,))
+                        # Wrapper returns dict-like or tuple? Wrapper fetchone returns what cursor returns.
+                        # DictCursor returns RealDictRow (dict-like).
+                        # Tuple cursor returns tuple.
+                        # Our db_manager uses DictCursor.
+                        row_id = existing['id']
+                        cur.execute("UPDATE patterns SET weight = weight + 1 WHERE id=?", (row_id,))
                     else:
                         # Learn
                         anonymized_example = f"Pattern for {field}" 
-                        execute_query(cur, "INSERT INTO patterns (field_name, regex_pattern, example_match, created_at) VALUES (?, ?, ?, ?)",
+                        cur.execute("INSERT INTO patterns (field_name, regex_pattern, example_match, created_at) VALUES (?, ?, ?, ?)",
                                     (field, regex, anonymized_example, now))
                         count += 1
         
@@ -161,19 +147,23 @@ def analyze(full_text):
     try:
         conn = get_ia_conn()
         cur = conn.cursor()
-        execute_query(cur, "SELECT field_name, regex_pattern FROM patterns ORDER BY weight DESC")
+        
+        # Explicitly use iago.patterns to avoid path issues
+        cur.execute("SELECT field_name, regex_pattern FROM iago.patterns ORDER BY weight DESC")
         rows = cur.fetchall()
         conn.close()
+        
+        print(f"[IAGO] Analysis: Found {len(rows)} patterns.")
         
         results = {}
         
         for r in rows:
             # Handle row access difference
-            field = r["field_name"] if hasattr(r, 'keys') else r[0]
+            field = r["field_name"]
             if field in results:
                 continue
                 
-            pattern = r["regex_pattern"] if hasattr(r, 'keys') else r[1]
+            pattern = r["regex_pattern"]
             try:
                 match = re.search(pattern, full_text)
                 if match:
@@ -186,3 +176,4 @@ def analyze(full_text):
     except Exception as e:
         print(f"[IAGO DB ERROR] Analyze: {e}")
         return {}
+

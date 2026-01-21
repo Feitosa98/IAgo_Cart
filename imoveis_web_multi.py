@@ -17,6 +17,8 @@ from apscheduler.schedulers.background import BackgroundScheduler
 import updater
 import atexit
 import db_manager # [NEW]
+import logging
+from celery import Celery # [NEW]
 
 
 from flask import (
@@ -33,10 +35,10 @@ from flask import (
 )
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
 # ... (existing config)
-
-
 
 # ==============================
 # CONFIGURAÇÃO
@@ -49,7 +51,7 @@ def get_base_path():
 
 BASE_DIR = get_base_path()
 # DB_PATH = os.path.join(BASE_DIR, "imoveis.db") # [REMOVED]
-SECRET_KEY = "onr-indicador-real-web-123"
+SECRET_KEY = os.getenv("SECRET_KEY", "dev-secure-key-change-this-in-prod")
 UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads")
 ALLOWED_EXTENSIONS = {'tif', 'tiff', 'png', 'jpg', 'jpeg', 'pdf'}
 
@@ -79,19 +81,9 @@ else:
         pytesseract.pytesseract.tesseract_cmd = default_tess
 
 # Validate Poppler
-# Validate Poppler
-if not POPPLER_PATH or not os.path.exists(POPPLER_PATH):
-    # Try local assets (downloaded by script)
-    local_poppler = os.path.join(BASE_DIR, "installer_assets", "poppler", "Library", "bin")
-    if os.path.exists(local_poppler):
-        POPPLER_PATH = local_poppler
-    else:
-        # Try direct bin (some builds)
-        local_poppler_bin = os.path.join(BASE_DIR, "installer_assets", "poppler", "bin")
-        if os.path.exists(local_poppler_bin):
-            POPPLER_PATH = local_poppler_bin
-        else:
-            POPPLER_PATH = "" 
+if POPPLER_PATH and not os.path.exists(POPPLER_PATH):
+    # Try to find it common or reset
+    POPPLER_PATH = "" 
 
 # Determine paths for PyInstaller
 if getattr(sys, 'frozen', False):
@@ -106,10 +98,42 @@ else:
 app.secret_key = SECRET_KEY
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
+# Celery Configuration
+app.config['CELERY_BROKER_URL'] = os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/0')
+app.config['CELERY_RESULT_BACKEND'] = os.getenv('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
+
+celery = Celery(app.name, broker=app.config['CELERY_BROKER_URL'])
+celery.conf.update(app.config)
+
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 
+# Setup Rate Limiter
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=["200 per day", "50 per hour"],
+    storage_uri="memory://",
+)
+
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(seconds=3600)
+
+@app.route("/health")
+def health_check():
+    """Health check endpoint for monitoring."""
+    status = {"status": "ok", "database": "unknown", "timestamp": datetime.now(timezone.utc).isoformat()}
+    try:
+        # Check DB connection
+        conn = db_manager.get_db_connection()
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1")
+        db_manager.release_db_connection(conn)
+        status["database"] = "connected"
+        return jsonify(status), 200
+    except Exception as e:
+        status["status"] = "error"
+        status["database"] = str(e)
+        return jsonify(status), 500
 
 def init_db():
     pass
@@ -225,7 +249,35 @@ cron_scheduler.start()
 atexit.register(lambda: cron_scheduler.shutdown())
 
 
-# ... (skipping constants) ...
+# ==============================
+# LOGGING CONFIGURATION
+# ==============================
+try:
+    from pythonjsonlogger import jsonlogger
+    
+    logHandler = logging.StreamHandler()
+    formatter = jsonlogger.JsonFormatter(
+        fmt='%(asctime)s %(levelname)s %(name)s %(message)s'
+    )
+    logHandler.setFormatter(formatter)
+    
+    # Remove default handlers to avoid duplicates check
+    root_logger = logging.getLogger()
+    if root_logger.handlers:
+        for handler in root_logger.handlers[:]:
+             root_logger.removeHandler(handler)
+             
+    root_logger.addHandler(logHandler)
+    root_logger.setLevel(logging.INFO)
+    
+    # Optional: Suppress noisy libs
+    logging.getLogger('werkzeug').setLevel(logging.WARNING)
+    logging.getLogger('urllib3').setLevel(logging.WARNING)
+
+except ImportError:
+    logging.basicConfig(level=logging.INFO)
+    logging.warning("python-json-logger not found, using default logging.")
+# ==============================
 
 # ==============================
 # ROUTE UPDATES START HERE
@@ -348,52 +400,30 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def ocr_file_to_text(filepath: str) -> str:
-    """Extrai texto de TIFF, PNG, JPG ou PDF (Priorizando Cabeçalho)."""
+    """Extrai texto de TIFF, PNG, JPG ou PDF."""
     ext = filepath.rsplit('.', 1)[1].lower()
     text = ""
-    
-    def process_image(img):
-        # 1. Full Page
-        full = pytesseract.image_to_string(img)
-        
-        # 2. Header Crop (Top 30%)
-        w, h = img.size
-        # Crop box: left, upper, right, lower
-        header_img = img.crop((0, 0, w, int(h * 0.30)))
-        header = pytesseract.image_to_string(header_img)
-        
-        # Concatenate: Header first (to prioritize Regex matching)
-        return f"--- HEADER BEGIN ---\n{header}\n--- HEADER END ---\n{full}"
-
     try:
         if ext == 'pdf':
             if convert_from_path is None:
                 raise Exception("Biblioteca pdf2image não disponível.")
             
+            # Read 1st page
             try:
-                # Read 1st page for Header Optimization
+                # Use configured Poppler path if available
                 kwargs = {}
                 if POPPLER_PATH:
                     kwargs['poppler_path'] = POPPLER_PATH
                 
-                # Check how many pages? Just get first few.
-                pages = convert_from_path(filepath, first_page=1, last_page=3, **kwargs)
-                
-                for i, page in enumerate(pages):
-                    if i == 0:
-                        # Apply Header Logic to first page only (Matricula/Address usually here)
-                        text += process_image(page) + "\n"
-                    else:
-                        text += pytesseract.image_to_string(page) + "\n"
-                        
+                pages = convert_from_path(filepath, first_page=1, last_page=2, **kwargs)
+                for page in pages:
+                    text += pytesseract.image_to_string(page) + "\n"
             except Exception as e:
                 print(f"[OCR ERROR] pdf2image failed. Check Poppler path. Details: {e}")
                 return ""
         else:
-            # Single Image
             img = Image.open(filepath)
-            text = process_image(img)
-            
+            text = pytesseract.image_to_string(img)
     except Exception as e:
         print(f"Erro no OCR: {e}")
         return ""
@@ -467,8 +497,8 @@ def parse_contribuinte(text: str) -> list:
     # Split by comma and strip
     return [c.strip() for c in text.split(',') if c.strip()]
 
-def save_dict_to_db_web(data: dict, tiff_path: str | None = None, ocr_text: str = "") -> int:
-    conn = get_conn()
+def save_dict_to_db_web(data: dict, tiff_path: str | None = None, ocr_text: str = "", schema_override=None) -> int:
+    conn = get_conn(schema_override)
     cur = conn.cursor()
     now = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=4)).isoformat()
     cur.execute(
@@ -539,13 +569,16 @@ def row_to_indicador_item(row, tipoenvio: int) -> dict:
         },
     }
 
-def get_conn():
+def get_conn(schema_override=None):
     # conn = sqlite3.connect(DB_PATH)
     # conn.row_factory = sqlite3.Row
     # return conn
     
     # Cloud DB Logic
-    schema = session.get('tenant_schema', 'tenant_default') if has_request_context() else 'tenant_default'
+    if schema_override:
+        schema = schema_override
+    else:
+        schema = session.get('tenant_schema', 'tenant_default') if has_request_context() else 'tenant_default'
     wrapper = db_manager.get_compat_conn()
     
     # Set Schema
@@ -594,16 +627,9 @@ class User(UserMixin):
         conn = db_manager.get_compat_conn() 
         cur = conn.cursor()
         try:
-            # Postgres fetch
-            # Note: We use db_manager, so conn.conn gives actual psycopg2 connection
-            # We must be careful with cursor types. db_manager returns wrapped connection.
-            # But here we want direct access or use wrapper? Wrapper handles %s conversion.
-            # Let's use wrapper for consistency but query public.
-            
-            # Explicitly set path not needed if we fully qualify, but safe:
             cur.execute("SET search_path TO public")
-            
-            cur.execute("SELECT id, username, role, whatsapp, is_temporary_password, profile_image, email, nome_completo, cpf, last_seen FROM public.users WHERE id = %s", (user_id,))
+            # Postgres fetch
+            cur.execute("SELECT id, username, role, whatsapp, is_temporary_password, profile_image, email, nome_completo, cpf, last_seen FROM users WHERE id = %s", (user_id,))
         except Exception as e:
             print(f"[User Get Error] {e}")
             return None
@@ -612,13 +638,7 @@ class User(UserMixin):
         conn.close()
         if not user:
             return None
-            
-        # Handle dict-like row access (psycopg2 RealDictCursor or similar)
-        # If tuple: access by index. If dict: by key.
-        # db_manager uses DictCursor usually.
-        
-        # Check if user is tuple or dict
-        # We assume Dict due to db_manager setup
+        # Handle dict-like row
         u = User(user['id'], user['username'], user['role'], whatsapp=user['whatsapp'], is_temporary_password=user['is_temporary_password'], profile_image=user['profile_image'], email=user['email'], nome_completo=user['nome_completo'], cpf=user['cpf'])
         u.last_seen = user['last_seen']
         return u
@@ -629,7 +649,7 @@ class User(UserMixin):
         cur = conn.cursor()
         try:
             cur.execute("SET search_path TO public")
-            cur.execute("SELECT id, username, role, password_hash, whatsapp, is_temporary_password, profile_image, email, nome_completo, cpf, last_seen FROM public.users WHERE username = %s", (username,))
+            cur.execute("SELECT id, username, role, password_hash, whatsapp, is_temporary_password, profile_image, email, nome_completo, cpf, last_seen FROM users WHERE username = %s", (username,))
         except Exception as e:
             print(f"[User GetByUsername Error] {e}")
             return None
@@ -638,7 +658,6 @@ class User(UserMixin):
         conn.close()
         if not user:
             return None
-            
         u = User(user['id'], user['username'], user['role'], user['password_hash'], user['whatsapp'], user['is_temporary_password'], user['profile_image'], email=user['email'], nome_completo=user['nome_completo'], cpf=user['cpf'])
         u.last_seen = user['last_seen']
         return u
@@ -815,16 +834,18 @@ def csrf_protect():
             # Actually, standard pattern:
             # 1. Generate token and put in session if not present.
             # 2. If POST, check form token vs session token.
-            pass # See check below
             
-        if not token or token != request.form.get('csrf_token'):
-             # Allow file upload checks to pass if we handle separate?
-             # For now, simplistic approach:
-             # Exclude login/public? No, login needs it too to prevent login CSRF.
-             # Strict check:
-             if request.form.get("mode") == "ajax" or request.is_json:
+            # EXCEPTION: If logging in, maybe we tolerate missing token if standard login? 
+            # No, login needs it. 
+            # The issue is likely that session['csrf_token'] wasn't set when the form was rendered 
+            # OR the session cookie is being dropped/rotated.
+
+            # Debugging:
+            logging.error(f"CSRF Fail. Session: {token}, Form: {request.form.get('csrf_token')}")
+            
+            if request.form.get("mode") == "ajax" or request.is_json:
                  return jsonify({"status": "error", "message": "Sessão expirada ou Token inválido. Recarregue a página."}), 403
-             return "CSRF Token missing or invalid", 403
+            return "CSRF Token missing or invalid", 403
 
 def generate_csrf_token():
     if 'csrf_token' not in session:
@@ -845,123 +866,75 @@ def check_temporary_password():
 # ROTAS
 # ==============================
 
-@app.route("/debug_db")
-def debug_db():
-    try:
-        conn = db_manager.get_compat_conn()
-        cur = conn.conn.cursor()
-        cur.execute("SELECT 1")
-        res = cur.fetchone()
-        conn.close()
-        return f"DB OK: {res}"
-    except Exception as e:
-        return f"DB FAIL: {e}", 500
-
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if current_user.is_authenticated:
-        return redirect(url_for("index"))
+        return redirect(url_for("select_tenant"))
 
-    # Load Tenants (Optional for display, but not for select anymore)
-    # We don't really need them for display if we removed the select.
-    # But let's keep it safe.
-    
     if request.method == "POST":
         username = request.form.get("username")
         password = request.form.get("password")
         
-        # 1. Authenticate against Global User
-        user = User.get_by_username(username) # Queries public.users
-        
+        # Authenticate against PUBLIC users
+        user = User.get_by_username(username)
         if user and check_password_hash(user.password_hash, password):
-            # 2. Check Allowed Tenants
-            conn = db_manager.get_compat_conn()
-            cur = conn.conn.cursor()
-            cur.execute("""
-                SELECT t.name, t.slug, t.schema_name 
-                FROM tenants t
-                JOIN user_tenants ut ON t.id = ut.tenant_id
-                WHERE ut.user_id = %s
-            """, (user.id,))
-            allowed_tenants = [dict(name=row[0], slug=row[1], schema_name=row[2]) for row in cur.fetchall()]
-            conn.close()
-
-            if not allowed_tenants:
-                flash("Este usuário não tem acesso a nenhum cartório.", "danger")
-                return redirect(url_for('login'))
-
             login_user(user)
-            
-            # Set Multi-Tenant Flag
-            session['multi_tenant'] = len(allowed_tenants) > 1
-            
-            # 3. Determine Redirection
-            if len(allowed_tenants) == 1:
-                # Auto-selected
-                target = allowed_tenants[0]
-                session['tenant_schema'] = target['schema_name']
-                session['cartorio_slug'] = target['slug']
-                session['cartorio_name'] = target['name']
-                
-                if user.is_temporary_password:
-                    return redirect(url_for("alterar_senha"))
-                return redirect(url_for("index"))
-            else:
-                # Multiple -> Selection Screen
-                return redirect(url_for('select_cartorio'))
-
+            if user.is_temporary_password:
+                return redirect(url_for("alterar_senha"))
+            return redirect(url_for("select_tenant"))
+        
         flash("Usuário ou senha inválidos", "danger")
 
     return render_template("login.html")
 
-@app.route("/select_cartorio", methods=["GET", "POST"])
+@app.route("/select_tenant", methods=["GET", "POST"])
 @login_required
-def select_cartorio():
+def select_tenant():
+    # 1. Fetch available tenants for this user
     conn = db_manager.get_compat_conn()
-    cur = conn.conn.cursor()
-    cur.execute("""
-        SELECT t.name, t.slug, t.schema_name 
-        FROM tenants t
-        JOIN user_tenants ut ON t.id = ut.tenant_id
-        WHERE ut.user_id = %s
-    """, (current_user.id,))
-    allowed_tenants = [dict(name=row[0], slug=row[1], schema_name=row[2]) for row in cur.fetchall()]
+    cur = conn.cursor()
+    
+    tenants = []
+    if current_user.role == 'admin':
+        # Admin sees ALL tenants
+        cur.execute("SELECT id, name, slug, schema_name FROM tenants ORDER BY name")
+    else:
+        # User sees assigned tenants
+        cur.execute("""
+            SELECT t.id, t.name, t.slug, t.schema_name 
+            FROM tenants t
+            JOIN user_tenants ut ON ut.tenant_id = t.id
+            WHERE ut.user_id = %s
+            ORDER BY t.name
+        """, (current_user.id,))
+        
+    tenants = [dict(id=row[0], name=row[1], slug=row[2], schema_name=row[3]) for row in cur.fetchall()]
     conn.close()
     
-    # Update Flag
-    session['multi_tenant'] = len(allowed_tenants) > 1
-
-    if not allowed_tenants:
-        flash("Sem acesso a nenhum cartório.", "danger")
-        return redirect(url_for("logout"))
+    # If only 1 tenant is available, auto-redirect? 
+    # User might prefer seeing the dashboard confirmation.
+    # But common pattern is auto-select if single option.
+    # Let's keep manual selection for clarity unless it causes friction (User requested "dashboard com todos os cartorios").
     
-    # Safeguard: If user somehow lands here but only has 1 tenant, auto-select.
-    if len(allowed_tenants) == 1:
-        target = allowed_tenants[0]
-        session['tenant_schema'] = target['schema_name']
-        session['cartorio_slug'] = target['slug']
-        session['cartorio_name'] = target['name']
-        return redirect(url_for("index"))
-        
     if request.method == "POST":
-        slug = request.form.get("cartorio_slug")
-        target = next((t for t in allowed_tenants if t['slug'] == slug), None)
+        slug = request.form.get("tenant_slug")
+        target = next((t for t in tenants if t['slug'] == slug), None)
         
         if target:
             session['tenant_schema'] = target['schema_name']
-            session['cartorio_slug'] = target['slug']
-            session['cartorio_name'] = target['name']
+            session['tenant_name'] = target['name'] # For UI display
+            flash(f"Acessando {target['name']}", "success")
             return redirect(url_for("index"))
-        else:
-            flash("Cartório inválido.", "danger")
-            
-    return render_template("select_cartorio.html", tenants=allowed_tenants)
+        
+        flash("Cartório inválido.", "danger")
+        
+    return render_template("select_tenant.html", tenants=tenants)
+
 
 @app.route("/logout")
 @login_required
 def logout():
     logout_user()
-    session.clear()
     return redirect(url_for("login"))
 
 @app.route("/recuperar_senha", methods=["GET", "POST"])
@@ -995,6 +968,65 @@ def privacidade():
 def termos():
     return render_template("termos.html")
 
+@celery.task(bind=True)
+def process_upload_task(self, filename, filepath, tenant_schema, overwrite=False):
+    """
+    Background task to process uploaded file (OCR + Parse + Save).
+    """
+    try:
+        logging.info(f"[Task {self.request.id}] Processing {filename} for tenant {tenant_schema}")
+
+        # 1. Parse filename for matricula (Logic from view)
+        basename = os.path.splitext(filename)[0]
+        matricula_from_file = None
+        match = re.search(r'(\d+)', basename)
+        if match:
+            if int(match.group(1)) > 1:
+                matricula_from_file = str(int(match.group(1)))
+
+        # 2. OCR
+        txt = ocr_file_to_text(filepath)
+        data = parse_text_to_dict(txt)
+
+        # 3. IAGO Analysis
+        ia_data = iago.analyze(txt)
+        for k, v in ia_data.items():
+            if v:
+                data[k] = v
+        
+        # Override matricula if filename has one
+        if matricula_from_file:
+            data["NUMERO_REGISTRO"] = matricula_from_file
+
+        matricula = data.get("NUMERO_REGISTRO")
+        
+        # 4. Duplicate Check & Save
+        if matricula:
+            conn = get_conn(schema_override=tenant_schema)
+            cur = conn.cursor()
+            cur.execute("SELECT id FROM imoveis WHERE numero_registro = ?", (matricula,))
+            existing = cur.fetchone()
+            conn.close()
+
+            if existing and not overwrite:
+                logging.info(f"Skipping duplicate {matricula}")
+                return {"status": "duplicate", "matricula": matricula}
+            
+            if existing and overwrite:
+                conn = get_conn(schema_override=tenant_schema)
+                cur = conn.cursor()
+                cur.execute("DELETE FROM imoveis WHERE id=?", (existing[0],))
+                conn.commit()
+                conn.close()
+
+        nid = save_dict_to_db_web(data, tiff_path=filepath, ocr_text=txt, schema_override=tenant_schema)
+        logging.info(f"Successfully saved imovel {nid}")
+        return {"status": "success", "matricula": matricula}
+
+    except Exception as e:
+        logging.error(f"Task failed for {filename}: {e}")
+        return {"status": "error", "error": str(e)}
+
 @app.route("/importar", methods=["GET", "POST"])
 @login_required
 def importar_arquivo():
@@ -1023,141 +1055,172 @@ def importar_arquivo():
         # or just process the first one if we design the frontend to send one by one.
         # Design decision: Frontend sends one by one. Backend processes list (always list).
         
-        saved_files = []
+        results = []
+        tenant_schema = session.get('tenant_schema', 'tenant_default')
+
         for file in files:
+            res = {'filename': file.filename, 'success': False}
             if file and allowed_file(file.filename):
                 filename = secure_filename(file.filename)
                 filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
                 file.save(filepath)
-                saved_files.append((filename, filepath))
-        
-        # Grouping Logic
-        groups = {}
-        singles = []
-        
-        # Regex: Start with digits, then underscore.
-        pattern = re.compile(r"^(\d+)_")
-        
-        for name, path in saved_files:
-            match = pattern.match(name)
-            if match:
-                prefix = match.group(1)
-                # Ensure valid matricula number (>1 to match user pref, although regex is just digits)
-                if int(prefix) > 1:
-                     if prefix not in groups:
-                         groups[prefix] = []
-                     groups[prefix].append((name, path))
-                else:
-                     singles.append((name, path))
-            else:
-                singles.append((name, path))
-        
-        results = []
-        
-        def process_entry(final_name, final_path, forced_matricula=None):
-            res = {'filename': final_name, 'success': False}
-            try:
-                # 1. PARSE FILENAME if forced_matricula not set
-                matricula_from_file = forced_matricula
                 
-                if not matricula_from_file:
-                    # Attempt standard fallback logic
-                    basename = os.path.splitext(final_name)[0]
-                    match = re.search(r'(\d+)', basename)
-                    if match and int(match.group(1)) > 1:
-                         matricula_from_file = str(int(match.group(1)))
-                
-                txt = ocr_file_to_text(final_path)
-                data = parse_text_to_dict(txt)
-                
-                # IAGO ANALYSIS
-                ia_data = iago.analyze(txt)
-                for k, v in ia_data.items():
-                        if v: data[k] = v
-                
-                if matricula_from_file:
-                    data["NUMERO_REGISTRO"] = matricula_from_file
-                
-                matricula = data.get("NUMERO_REGISTRO")
-                
-                # DUPLICATE CHECK
-                if matricula:
-                    conn = get_conn()
-                    cur = conn.cursor()
-                    cur.execute("SELECT id FROM imoveis WHERE numero_registro = ?", (matricula,))
-                    existing = cur.fetchone()
-                    conn.close()
-                    
-                    if existing and not overwrite:
-                        res['error'] = f"Matrícula {matricula} já existe."
-                        return res
-                    
-                    if existing and overwrite:
-                        conn = get_conn()
-                        cur = conn.cursor()
-                        cur.execute("DELETE FROM imoveis WHERE id=?", (existing[0],))
-                        conn.commit()
-                        conn.close()
-
-                nid = save_dict_to_db_web(data, tiff_path=final_path, ocr_text=txt)
+                # Queue Task
+                task = process_upload_task.delay(filename, filepath, tenant_schema, overwrite)
                 
                 res['success'] = True
-                res['matricula'] = matricula
-            except Exception as e:
-                res['error'] = str(e)
-                print(f"Error importing {final_name}: {e}")
-            return res
-
-        # 1. Process Groups (Merge)
-        for prefix, group_files in groups.items():
-            # Sort by filename to ensure page order (001f, 002v, etc)
-            # Use string sort as it handles padded numbers well: 001 < 002
-            group_files.sort(key=lambda x: x[0])
+                res['task_id'] = task.id
+                res['message'] = "Processamento iniciado em segundo plano."
+            else:
+                res['error'] = "Arquivo inválido"
             
-            # Merge
-            try:
-                images = []
-                for _, path in group_files:
-                    # Open and convert to RGB (PDF doesn't support RGBA in Pillow generally)
-                    img = Image.open(path).convert('RGB')
-                    images.append(img)
-                
-                if not images:
-                    continue
-                    
-                merged_filename = f"{prefix}_merged.pdf"
-                merged_path = os.path.join(app.config['UPLOAD_FOLDER'], merged_filename)
-                
-                # Save first image as PDF, appending others
-                images[0].save(merged_path, save_all=True, append_images=images[1:])
-                
-                # Process the Merged PDF
-                # Force matricula because we grouped by it
-                res = process_entry(merged_filename, merged_path, forced_matricula=prefix)
-                results.append(res)
-                
-            except Exception as e:
-                print(f"Error merging group {prefix}: {e}")
-                results.append({'filename': f"Group {prefix}", 'success': False, 'error': f"Merge error: {e}"})
-
-        # 2. Process Singles
-        for name, path in singles:
-            res = process_entry(name, path)
             results.append(res)
 
         if is_ajax:
-            return response("success", "Importado com sucesso", matricula=results[0].get('matricula'))
+            return response("success", "Arquivos enviados para processamento.", details=results)
 
-        # Fallback for standard form (if ever used)
-        success_count = sum(1 for r in results if r['success'])
-        error_count = len(results) - success_count
-        return render_template("import_resumo.html", total_files=len(files), success_count=success_count, error_count=error_count, details=results)
+        flash("Arquivos enviados para processamento em segundo plano.", "info")
+        return redirect(url_for("index"))
 
     return render_template("importar.html")
+
+@app.route("/admin/tenants")
+@login_required
+def admin_tenants():
+    if current_user.role != 'admin':
+        flash("Acesso negado.", "danger")
+        return redirect(url_for('index'))
+    
+    import tenant_manager
+    tenants = tenant_manager.get_all_tenants()
+    return render_template("admin_tenants.html", tenants=tenants)
+
+@app.route("/admin/tenants/create", methods=["POST"])
+@login_required
+def admin_create_tenant():
+    if current_user.role != 'admin':
+        abort(403)
+        
+    name = request.form.get("name")
+    slug = request.form.get("slug")
+    domain = request.form.get("domain")
+    
+    import tenant_manager
+    success, msg = tenant_manager.create_tenant(name, slug, domain)
+    if success:
+        flash("Cartório criado com sucesso!", "success")
+    else:
+        flash(f"Erro ao criar: {msg}", "danger")
+        
+    return redirect(url_for('admin_tenants'))
+
+@app.route("/admin/tenants/<slug>/edit", methods=["POST"])
+@login_required
+def admin_edit_tenant(slug):
+    if current_user.role != 'admin':
+        abort(403)
+        
+    name = request.form.get("name")
+    domain = request.form.get("domain")
+    
+    import tenant_manager
+    if tenant_manager.update_tenant(slug, name, domain):
+        flash("Cartório atualizado.", "success")
+    else:
+        flash("Erro ao atualizar.", "danger")
+        
+    return redirect(url_for('admin_tenants'))
+
+@app.route("/admin/tenants/<slug>/users")
+@login_required
+def admin_tenant_users(slug):
+    if current_user.role != 'admin':
+        abort(403)
+        
+    import tenant_manager
+    tenant = tenant_manager.get_tenant_by_slug(slug)
+    if not tenant:
+        flash("Cartório não encontrado.", "danger")
+        return redirect(url_for('admin_tenants'))
+        
+    users = tenant_manager.get_tenant_users(tenant['id'])
+    return render_template("admin_tenant_users.html", tenant=tenant, users=users)
+
+@app.route("/admin/tenants/<slug>/add_user", methods=["POST"])
+@login_required
+def admin_tenant_add_user(slug):
+    if current_user.role != 'admin':
+        abort(403)
+        
+    import tenant_manager
+    tenant = tenant_manager.get_tenant_by_slug(slug)
+    
+    # Mode: Existing vs New
+    existing_user = request.form.get("existing_username")
+    new_user = request.form.get("new_username")
+    
+    if existing_user:
+        # Link
+        success, msg = tenant_manager.add_user_to_tenant(tenant['id'], existing_user)
+        if success:
+            flash("Usuário adicionado.", "success")
+        else:
+            flash(f"Erro: {msg}", "danger")
+            
+    elif new_user:
+        # Create & Link
+        # Access creating global user logic (replicate here or import?)
+        # For simplicity, do standard insert then link
+        try:
+             conn = db_manager.get_compat_conn()
+             cur = conn.conn.cursor()
+             cur.execute("SET search_path TO public")
+             
+             hashed = generate_password_hash(request.form.get("new_password"))
+             role = request.form.get("new_role")
+             full_name = request.form.get("new_fullname")
+             
+             cur.execute("""
+                INSERT INTO users (username, password_hash, role, nome_completo, created_at)
+                VALUES (%s, %s, %s, %s, %s) RETURNING id
+             """, (new_user, hashed, role, full_name, datetime.now().isoformat()))
+             
+             new_uid = cur.fetchone()[0]
+             conn.conn.commit()
+             conn.close()
+             
+             # Link
+             tenant_manager.add_user_to_tenant(tenant['id'], new_user) # Logic inside fetches ID again, safe
+             flash("Usuário criado e vinculado.", "success")
+             
+        except Exception as e:
+            flash(f"Erro criando usuário: {e}", "danger")
+            
+    return redirect(url_for('admin_tenant_users', slug=slug))
+
+@app.route("/admin/tenants/<slug>/remove_user", methods=["POST"])
+@login_required
+def admin_tenant_remove_user(slug):
+    if current_user.role != 'admin':
+        abort(403)
+        
+    user_id = request.form.get("user_id")
+    import tenant_manager
+    tenant = tenant_manager.get_tenant_by_slug(slug)
+    
+    if tenant_manager.remove_user_from_tenant(tenant['id'], user_id):
+        flash("Acesso removido.", "success")
+    else:
+        flash("Erro ao remover acesso.", "danger")
+        
+    return redirect(url_for('admin_tenant_users', slug=slug))
 
 @app.route("/", methods=["GET", "POST"])
 @login_required
 def index():
+    if 'tenant_schema' not in session:
+        return redirect(url_for('select_tenant'))
+
     # Filtering
     filtro_status = request.args.get('status', 'todos') 
     q = request.args.get("q", "").strip()
@@ -1233,178 +1296,28 @@ def index():
 @app.route("/dashboard")
 @login_required
 def dashboard():
-    # Only Admin/Supervisor/Colab? Usually dashboard is for everyone, but filtered? 
-    # Current code blocked Colab. User wants metrics per user.
-    # We can allow Colab to see their own? Or see general?
-    # Original code: if current_user.role == 'colaborador': redirect index. 
-    # I'll keep the restriction if the user didn't ask to remove it, but user asked for "Performance per user".
-    # This implies Admin viewing it. 
-    
     if current_user.role == 'colaborador':
-         flash("Acesso não autorizado.", "danger")
-         return redirect(url_for('index'))
-
-    conn = get_conn()
-    cur = conn.cursor()
-    
-    # 1. Basic Counts
-    cur.execute("SELECT COUNT(*) FROM imoveis")
-    total = cur.fetchone()[0] or 0
-    
-    cur.execute("SELECT COUNT(*) FROM imoveis WHERE status_trabalho='CONCLUIDO'")
-    concluidos = cur.fetchone()[0] or 0
-    
-    pendentes = total - concluidos
-    
-    # 2. Top Performers (by concluded count)
-    # Assumes 'concluded_by' stores username or ID. Index uses it as username likely.
-    cur.execute("""
-        SELECT concluded_by, COUNT(*) as count 
-        FROM imoveis 
-        WHERE status_trabalho='CONCLUIDO' AND concluded_by IS NOT NULL AND concluded_by != ''
-        GROUP BY concluded_by 
-        ORDER BY count DESC 
-        LIMIT 5
-    """)
-    top_performers = [{"name": r[0], "count": r[1]} for r in cur.fetchall()]
-    
-    # 3. Productivity (Last 7 Days)
-    # Group by date(updated_at)
-    # SQLite uses strftime, Postgres uses to_char or date_trunc.
-    # Since we are using db_manager with Postgres now (implied by previous tasks), we should use Postgres syntax OR generic.
-    # Wait, the system might still be running on local SQLite for some parts if not fully migrated?
-    # User refactored Auth to Global Postgres. But Imoveis might still be SQLite if they aren't migrated?
-    # `get_conn()` checks `tenant_schema` and sets `search_path`. This implies Postgres.
-    # So I use Postgres syntax: TO_CHAR(updated_at, 'YYYY-MM-DD').
-    
-    cur.execute("""
-        SELECT TO_CHAR(updated_at::timestamp, 'MM-DD'), COUNT(*) 
-        FROM imoveis 
-        WHERE status_trabalho='CONCLUIDO' 
-          AND updated_at::timestamp >= CURRENT_DATE - INTERVAL '7 days'
-        GROUP BY 1 
-        ORDER BY 1
-    """)
-    rows = cur.fetchall()
-    
-    # Fill gaps? Chart.js can handle it or we pass sparse.
-    # user wants "desempenho por usuario".
-    
-    chart_labels = [r[0] for r in rows]
-    chart_data = [r[1] for r in rows]
-    
-    # 4. Property Type Distribution
-    # TIPO_IMOVEL is int. We need to map it to names in template or backend.
-    # 1: "Casa", 2: "Apartamento", etc. (defined in TIPO_IMOVEL_OPCOES at top of file)
-    # Generic generic query:
-    cur.execute("SELECT tipo_de_imovel, COUNT(*) FROM imoveis GROUP BY 1 ORDER BY 2 DESC")
-    type_data_raw = cur.fetchall()
-    
-    # Map int to string using global dict TIPO_IMOVEL_OPCOES
-    # We need to make sure TIPO_IMOVEL_OPCOES is accessible here. It is global.
-    type_labels = []
-    type_counts = []
-    for r in type_data_raw:
-        label = TIPO_IMOVEL_OPCOES.get(r[0], f"Outros ({r[0]})")
-        type_labels.append(label)
-        type_counts.append(r[1])
+        flash("Acesso negado.", "danger")
+        return redirect(url_for("index"))
         
-    # 5. Registry Type Distribution (Matrícula vs Transcrição)
-    cur.execute("SELECT registro_tipo, COUNT(*) FROM imoveis GROUP BY 1")
-    reg_data_raw = cur.fetchall()
-    reg_labels = []
-    reg_counts = []
-    for r in reg_data_raw:
-        # REGISTRO_TIPO_OPCOES = {1: "Matrícula", 2: "Matrícula Mãe", 4: "Transcrição"}
-        label = REGISTRO_TIPO_OPCOES.get(r[0], f"Tipo {r[0]}")
-        reg_labels.append(label)
-        reg_counts.append(r[1])
-
-    conn.close()
-    
-    return render_template("dashboard.html", 
-                           total=total, 
-                           concluidos=concluidos, 
-                           pendentes=pendentes,
-                           top_performers=top_performers,
-                           chart_labels=json.dumps(chart_labels),
-                           chart_data=json.dumps(chart_data),
-                           type_labels=json.dumps(type_labels),
-                           type_counts=json.dumps(type_counts),
-                           reg_labels=json.dumps(reg_labels),
-                           reg_counts=json.dumps(reg_counts))
-
-@app.route("/dashboard/relatorio")
-@login_required
-def dashboard_relatorio():
-    from fpdf import FPDF
-    import io
-    
     conn = get_conn()
     cur = conn.cursor()
+    
+    # Stats
     cur.execute("SELECT COUNT(*) FROM imoveis")
-    total = cur.fetchone()[0] or 0
+    total = cur.fetchone()[0]
+    
     cur.execute("SELECT COUNT(*) FROM imoveis WHERE status_trabalho='CONCLUIDO'")
-    concluidos = cur.fetchone()[0] or 0
+    concluidos = cur.fetchone()[0]
+    
     pendentes = total - concluidos
     
-    cur.execute("""
-        SELECT concluded_by, COUNT(*) as count 
-        FROM imoveis 
-        WHERE status_trabalho='CONCLUIDO' AND concluded_by IS NOT NULL AND concluded_by != ''
-        GROUP BY concluded_by 
-        ORDER BY count DESC 
-        LIMIT 5
-    """)
-    top_performers = cur.fetchall()
+    # Desempenho (simulado por logs de edição, mais complexo, vamos simplificar para total por usuario)
+    # Como não temos log de quem fez o que persistente além do lock, vamos deixar placeholder.
+    
     conn.close()
     
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", 'B', 16)
-    # Use generic name if session invalid, prevent error
-    c_name = session.get('cartorio_name', 'Cartorio')
-    pdf.cell(0, 10, f"Relatorio de Desempenho - {c_name}", 0, 1, 'C')
-    pdf.set_font("Arial", '', 10)
-    pdf.cell(0, 10, f"Gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}", 0, 1, 'C')
-    pdf.ln(10)
-    
-    pdf.set_font("Arial", 'B', 12)
-    pdf.cell(0, 10, "Visao Geral", 0, 1)
-    pdf.set_font("Arial", '', 11)
-    pdf.cell(60, 10, f"Total: {total}", 1)
-    pdf.cell(60, 10, f"Concluidas: {concluidos}", 1)
-    pdf.cell(60, 10, f"Pendentes: {pendentes}", 1)
-    pdf.ln(15)
-    
-    pdf.set_font("Arial", 'B', 12)
-    pdf.cell(0, 10, "Ranking de Produtividade", 0, 1)
-    pdf.ln(2)
-    pdf.set_font("Arial", 'B', 10)
-    pdf.cell(100, 8, "Colaborador", 1)
-    pdf.cell(50, 8, "Conclusoes", 1)
-    pdf.ln()
-    pdf.set_font("Arial", '', 10)
-    if top_performers:
-        for user_name, count in top_performers:
-            pdf.cell(100, 8, str(user_name), 1)
-            pdf.cell(50, 8, str(count), 1)
-            pdf.ln()
-    else:
-         pdf.cell(150, 8, "Nenhum dado", 1)
-         pdf.ln()
-
-    buffer = io.BytesIO()
-    pdf_content = pdf.output(dest='S').encode('latin-1') 
-    buffer.write(pdf_content)
-    buffer.seek(0)
-    
-    return send_file(
-        buffer,
-        as_attachment=True,
-        download_name=f"relatorio_{datetime.now().strftime('%Y%m%d')}.pdf",
-        mimetype='application/pdf'
-    )
+    return render_template("dashboard.html", total=total, concluidos=concluidos, pendentes=pendentes)
 
 @app.route("/configuracao/email", methods=["GET", "POST"])
 @login_required
@@ -1541,205 +1454,122 @@ def api_iago_analyze():
     
     return result
 
-@app.route("/usuarios")
+@app.route("/usuarios", methods=["GET", "POST"])
 @login_required
 def usuarios():
+    # Apenas admin ou supervisor pode acessar
     if current_user.role not in ['admin', 'supervisor']:
-        flash("Acesso negado.", "danger")
+        flash("Acesso não autorizado.", "error")
         return redirect(url_for('index'))
-
-    conn = db_manager.get_compat_conn()
-    cur = conn.cursor()
-    
-    # Postgres query using STRING_AGG
-    query = """
-        SELECT 
-            u.id, u.username, u.role, u.created_at, u.email, u.nome_completo, 
-            u.cpf, u.profile_image, u.whatsapp,
-            STRING_AGG(DISTINCT t.name, ', ') as assigned_tenants
-        FROM public.users u
-        LEFT JOIN public.user_tenants ut ON u.id = ut.user_id
-        LEFT JOIN public.tenants t ON ut.tenant_id = t.id
-        GROUP BY u.id
-        ORDER BY u.created_at DESC
-    """
-    
-    cur.execute(query)
-    rows = cur.fetchall()
-    users = []
-    
-    for r in rows:
-        # Map row based on expected columns
-        # (id, username, role, created_at, email, nome_completo, cpf, profile_image, whatsapp, assigned_tenants)
-        # Handle dict-like or tuple access
-        if hasattr(r, 'keys'):
-             u = dict(r)
-        else:
-             u = {
-                 "id": r[0], "username": r[1], "role": r[2], "created_at": r[3],
-                 "email": r[4], "nome_completo": r[5], "cpf": r[6], 
-                 "profile_image": r[7], "whatsapp": r[8], "assigned_tenants": r[9]
-             }
-        users.append(u)
-
-    conn.close()
-    return render_template("usuarios.html", users=users)
-
-@app.route("/usuarios/novo", methods=["GET", "POST"])
-@login_required
-def novo_usuario():
-    if current_user.role not in ['admin', 'supervisor']:
-        flash("Acesso negado.", "danger")
-        return redirect(url_for('index'))
-
-    conn = db_manager.get_compat_conn()
-    cur = conn.cursor()
 
     if request.method == "POST":
+        username = request.form.get("username")
+        password = request.form.get("password")
+        role = request.form.get("role")
+        whatsapp = request.form.get("whatsapp")
+        email = request.form.get("email") # New field
+        nome_completo = request.form.get("nome_completo")
+        cpf = request.form.get("cpf")
+
+        # Apenas admin pode criar admin/supervisor
+        if role in ['admin', 'supervisor'] and current_user.role != 'admin':
+            flash("Somente administradores podem criar supervisores ou outros admins.", "error")
+            return redirect(url_for('usuarios'))
+
+        password_hash = generate_password_hash(password)
+        
+        conn = get_conn()
+        cur = conn.cursor()
         try:
-            nome = request.form.get("nome_completo")
-            cpf = request.form.get("cpf")
-            username = request.form.get("username")
-            email = request.form.get("email")
-            password = request.form.get("password")
-            # WhatsApp Construction: combine DDI + Number if separate, or just take full string
-            # Form will likely send 'whatsapp_full' or we combine 'ddi' and 'phone'
-            # Let's assume the form sends a clean combined string or we clean it here.
-            # But the user asked for flags, so the form will likely have separate inputs or a widget.
-            # I will expect 'whatsapp' to be the final number, but I'll allow granular inputs if I decide to use them in template.
-            # Let's stick to reading 'whatsapp' and assuming the frontend puts the full number there.
-            whatsapp = request.form.get("whatsapp")
-            
-            role = request.form.get("role")
-            selected_tenants = request.form.getlist("assigned_tenants")
-            
-            password_hash = generate_password_hash(password)
-            
-            # Insert into public.users
-            cur.execute("""
-                INSERT INTO public.users 
-                (username, password_hash, role, whatsapp, email, nome_completo, cpf, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-                RETURNING id
-            """, (username, password_hash, role, whatsapp, email, nome, cpf))
-            
-            new_user_id = cur.fetchone()[0]
-            
-            # Link to Tenants
-            # If nothing selected, link to current (fallback)
-            if not selected_tenants:
-                current_slug = session.get('cartorio_slug', 'default')
-                cur.execute("SELECT id FROM public.tenants WHERE slug = %s", (current_slug,))
-                tenant_res = cur.fetchone()
-                if tenant_res:
-                    selected_tenants.append(tenant_res[0])
-            
-            # Insert links
-            for t_id in selected_tenants:
-                # Avoid duplicates just in case
-                cur.execute("""
-                    INSERT INTO public.user_tenants (user_id, tenant_id, role_in_tenant)
-                    VALUES (%s, %s, %s)
-                    ON CONFLICT DO NOTHING
-                """, (new_user_id, t_id, role))
-            
+            cur.execute(
+                "INSERT INTO users (username, password_hash, role, whatsapp, email, nome_completo, cpf) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (username, password_hash, role, whatsapp, email, nome_completo, cpf)
+            )
             conn.commit()
-            flash(f"Usuário {username} criado com sucesso!", "success")
-        except Exception as e:
-            conn.rollback()
-            flash(f"Erro ao criar usuário: {e}", "danger")
-        finally:
-            conn.close()
+            flash(f"Usuário {username} criado com sucesso.", "success")
             
+            # Notify New User
+            if email:
+                email_service.notify_user_created(email, username, password)
+                flash(f"E-mail de boas-vindas enviado para {email}.", "info")
+            
+            # Notify Admins
+            try:
+                admin_emails = get_admin_emails()
+                if admin_emails:
+                    email_service.notify_admin_new_user(admin_emails, username, current_user.username)
+            except Exception as e:
+                print(f"Erro ao notificar admins: {e}")
+            
+        except sqlite3.IntegrityError as e:
+            err_msg = str(e)
+            if "cpf" in err_msg.lower():
+                flash("CPF já cadastrado.", "error")
+            elif "username" in err_msg.lower():
+                 flash("Nome de usuário já existe.", "error")
+            else:
+                 flash(f"Erro de integridade (duplicidade): {e}", "error")
+
+        conn.close()
         return redirect(url_for('usuarios'))
 
-    # GET: Fetch all tenants for selection
-    cur.execute("SELECT id, name, slug FROM public.tenants ORDER BY name")
-    all_tenants = [dict(id=r[0], name=r[1], slug=r[2]) for r in cur.fetchall()]
-    conn.close()
+    conn = get_conn()
+    cur = conn.cursor()
+    # Fetch all fields to display
+    try:
+        cur.execute("SELECT id, username, role, created_at, email, nome_completo, cpf FROM users") 
+    except:
+        cur.execute("SELECT id, username, role, created_at, email, NULL as nome_completo, NULL as cpf FROM users")
 
-    return render_template("usuario_novo.html", all_tenants=all_tenants)
+    users = cur.fetchall()
+    conn.close()
+    return render_template("usuarios.html", users=users)
 
 @app.route("/usuarios/editar/<int:user_id>", methods=["GET", "POST"])
 @login_required
 def editar_usuario(user_id):
+    # Regra: Admin edita qualquer um. Supervisor edita colab e supervisor? "quando supervisor ele pode editar" - assumindo todos ou niveis abaixo?
+    # Vamos permitir supervisor editar qualquer perfil (exceto promover para admin se nao for admin)
     if current_user.role not in ['admin', 'supervisor']:
         flash("Acesso negado.", "danger")
         return redirect(url_for("index"))
         
-    conn = db_manager.get_compat_conn()
+    conn = get_conn()
     cur = conn.cursor()
     
     if request.method == "POST":
-        try:
-            username = request.form.get("username")
-            email = request.form.get("email")
-            nome_completo = request.form.get("nome_completo")
-            cpf = request.form.get("cpf")
-            whatsapp = request.form.get("whatsapp")
-            role = request.form.get("role")
-            nova_senha = request.form.get("nova_senha")
-            
-            # Update Public User
-            update_query = """
-                UPDATE public.users 
-                SET username=%s, email=%s, nome_completo=%s, cpf=%s, whatsapp=%s, role=%s
-                WHERE id=%s
-            """
-            cur.execute(update_query, (username, email, nome_completo, cpf, whatsapp, role, user_id))
-            
-            # Update Password if provided
-            if nova_senha and nova_senha.strip():
-                hashed = generate_password_hash(nova_senha.strip())
-                cur.execute("UPDATE public.users SET password_hash=%s, is_temporary_password=1 WHERE id=%s", (hashed, user_id))
-            
-            # Update Tenant Assignments
-            # Get selected tenant IDs from checkboxes
-            selected_tenants = request.form.getlist("assigned_tenants")
-            
-            # Wiping existing assignments for this user
-            cur.execute("DELETE FROM public.user_tenants WHERE user_id=%s", (user_id,))
-            
-            # Re-insert selected
-            for t_id in selected_tenants:
-                cur.execute("INSERT INTO public.user_tenants (user_id, tenant_id, role_in_tenant) VALUES (%s, %s, %s)", (user_id, t_id, role))
-                
-            conn.commit()
-            flash("Usuário atualizado com sucesso.", "success")
-        except Exception as e:
-            conn.rollback()
-            flash(f"Erro ao atualizar: {e}", "danger")
-        finally:
-            conn.close()
-            
+        novo_nome = request.form.get("username")
+        whatsapp = request.form.get("whatsapp")
+        reset_senha = request.form.get("reset_senha") # checkbox or just blank field? "resetar a senha" implies setting a new one or random
+        nova_senha_manual = request.form.get("nova_senha")
+        
+        # Update fields
+        cur.execute("UPDATE users SET username=?, whatsapp=? WHERE id=?", (novo_nome, whatsapp, user_id))
+        
+        if nova_senha_manual and nova_senha_manual.strip():
+             hashed = generate_password_hash(nova_senha_manual.strip())
+             # supervisor reset sets specific or random? User request: "resetar a senha". 
+             # Lets allow manual input. If they fill it, we change it.
+             # Also, should we set temporary? Request doesn't specify, but usually "reset" by admin means temporary.
+             # Let's set temporary=1 to force change.
+             cur.execute("UPDATE users SET password_hash=?, is_temporary_password=1 WHERE id=?", (hashed, user_id))
+             flash("Dados atualizados e senha resetada.", "success")
+        else:
+             flash("Dados atualizados.", "success")
+             
+        conn.commit()
+        conn.close()
         return redirect(url_for("usuarios"))
 
-    # GET: Fetch User + All Tenants + Assigned Tenants
+    cur.execute("SELECT * FROM users WHERE id=?", (user_id,))
+    u = cur.fetchone()
+    conn.close()
     
-    # 1. User Data
-    cur.execute("SELECT id, username, email, nome_completo, cpf, whatsapp, role FROM public.users WHERE id=%s", (user_id,))
-    row = cur.fetchone()
-    if not row:
-        conn.close()
+    if not u:
         flash("Usuário não encontrado.", "danger")
         return redirect(url_for("usuarios"))
         
-    u = {
-        "id": row[0], "username": row[1], "email": row[2], "nome_completo": row[3],
-        "cpf": row[4], "whatsapp": row[5], "role": row[6]
-    }
-    
-    # 2. All Tenants
-    cur.execute("SELECT id, name, slug FROM public.tenants ORDER BY name")
-    all_tenants = [dict(id=r[0], name=r[1], slug=r[2]) for r in cur.fetchall()]
-    
-    # 3. Assigned Tenant IDs
-    cur.execute("SELECT tenant_id FROM public.user_tenants WHERE user_id=%s", (user_id,))
-    user_tenant_ids = [r[0] for r in cur.fetchall()]
-    
-    conn.close()
-    
-    return render_template("usuario_editar.html", user=u, all_tenants=all_tenants, user_tenant_ids=user_tenant_ids)
+    return render_template("usuario_editar.html", user=u)
 
 
 @app.route("/perfil", methods=["GET", "POST"])
@@ -2658,76 +2488,6 @@ def exportar_json():
         headers={"Content-Disposition": "attachment;filename=indicador_real.json"}
     )
 
-
-@app.route("/admin/tenants", methods=["GET", "POST"])
-@login_required
-def admin_tenants():
-    if current_user.role != 'admin':
-        flash("Acesso negado.", "danger")
-        return redirect(url_for('index'))
-    
-    if request.method == "POST":
-        name = request.form.get("name")
-        slug = request.form.get("slug")
-        
-        if name and slug:
-            # Use Create Tenant Logic
-            # We can import or duplicate logic. Importing is cleaner but script is separate.
-            # Let's recreate logic here using db_manager.
-            
-            try:
-                conn = db_manager.get_db_connection() # Raw connection for isolation control
-                conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
-                cur = conn.cursor()
-                
-                # 1. Check/Insert Tenant
-                schema_name = f"tenant_{slug}"
-                cur.execute("INSERT INTO tenants (name, slug, schema_name) VALUES (%s, %s, %s) RETURNING id", (name, slug, schema_name))
-                tenant_id = cur.fetchone()[0]
-                
-                # 2. Create Schema
-                cur.execute(f"CREATE SCHEMA IF NOT EXISTS {schema_name}")
-                
-                # 3. Grant access to current user (Admin)
-                # User ID is current_user.id
-                cur.execute("""
-                    INSERT INTO user_tenants (user_id, tenant_id, role_in_tenant)
-                    VALUES (%s, %s, 'admin')
-                """, (current_user.id, tenant_id))
-
-                # 4. Tables (Simplified)
-                # Ideally we call a "setup_schema(slug)" function.
-                # For now, let's flash a message saying "Schema created, tables pending" or run basic.
-                cur.execute(f"SET search_path TO {schema_name}, public")
-                
-                # Quick Users table for referencing
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS users (
-                        id SERIAL PRIMARY KEY,
-                        username TEXT UNIQUE
-                    )
-                """)
-                # Real setup should be robust
-                
-                flash(f"Cartório '{name}' criado com sucesso!", "success")
-                cur.close()
-                conn.close() # Return to pool not ideal for raw conn? SimpleConnectionPool handles putconn.
-                # Actually db_manager.get_db_connection returns from pool.
-                # Ideally we should use db_manager.release_db_connection(conn)
-                db_manager.release_db_connection(conn)
-                
-            except Exception as e:
-                flash(f"Erro ao criar cartório: {e}", "danger")
-    
-    # List Tenants
-    conn = db_manager.get_compat_conn()
-    cur = conn.conn.cursor()
-    cur.execute("SELECT id, name, slug, schema_name, created_at FROM tenants ORDER BY name")
-    tenants = [dict(id=r[0], name=r[1], slug=r[2], schema_name=r[3], created_at=str(r[4]) if r[4] else None) for r in cur.fetchall()]
-    conn.close()
-    
-    return render_template("admin_tenants.html", tenants=tenants)
-
 if __name__ == "__main__":
     init_lock_table()
     
@@ -2740,7 +2500,7 @@ if __name__ == "__main__":
         s.close()
         print(f"\n{'='*40}")
         print(f" Servidor rodando!")
-        print(f" Acesse via: http://{ip_addr}:5005")
+        print(f" Acesse via: http://{ip_addr}:5000")
         print(f"{'='*40}\n")
     except Exception:
         print("Não foi possível detectar IP rede local. Acesse via localhost.")

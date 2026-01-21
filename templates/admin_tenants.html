@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+
+{% block conteudo %}
+<style>
+    .glass-card {
+        background: rgba(255, 255, 255, 0.9);
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.07);
+        border-radius: 16px;
+    }
+
+    .page-header {
+        background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+        color: white;
+        padding: 2rem;
+        border-radius: 16px;
+        margin-bottom: 2rem;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    }
+
+    .form-control-modern {
+        border: 2px solid #e9ecef;
+        border-radius: 10px;
+        padding: 0.8rem;
+        transition: all 0.3s;
+    }
+
+    .form-control-modern:focus {
+        border-color: #2a5298;
+        box-shadow: 0 0 0 4px rgba(42, 82, 152, 0.1);
+    }
+
+    .btn-premium {
+        background: #2a5298;
+        color: white;
+        border-radius: 10px;
+        padding: 0.8rem 2rem;
+        font-weight: 500;
+        transition: transform 0.2s, box-shadow 0.2s;
+        border: none;
+    }
+
+    .btn-premium:hover {
+        background: #1e3c72;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(42, 82, 152, 0.2);
+        color: white;
+    }
+
+    .table-modern thead th {
+        border-bottom: 2px solid #f0f2f5;
+        color: #6c757d;
+        font-weight: 600;
+        text-transform: uppercase;
+        font-size: 0.75rem;
+        letter-spacing: 1px;
+        padding-bottom: 1rem;
+    }
+
+    .table-modern tbody td {
+        padding: 1.2rem 1rem;
+        vertical-align: middle;
+        border-bottom: 1px solid #f0f2f5;
+        color: #344767;
+        font-weight: 500;
+    }
+
+    .tenant-badge {
+        width: 40px;
+        height: 40px;
+        background: #e9ecef;
+        color: #2a5298;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 10px;
+        font-size: 1.2rem;
+        margin-right: 1rem;
+    }
+</style>
+
+<div class="container-fluid py-4">
+    <!-- Header -->
+    <div class="page-header d-flex align-items-center justify-content-between">
+        <div>
+            <h2 class="fw-bold mb-1">Gestão de Cartórios</h2>
+            <p class="mb-0 opacity-75">Administre os cartórios registrados e adicione novas unidades.</p>
+        </div>
+        <div class="d-none d-md-block">
+            <i class="bi bi-bank fs-1 opacity-50"></i>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- Form Column -->
+        <div class="col-lg-4 mb-4">
+            <div class="glass-card h-100 p-4">
+                <h5 class="fw-bold mb-4 text-dark"><i class="bi bi-plus-circle me-2 text-primary"></i>Novo Cartório</h5>
+                <form method="post">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+                    <div class="mb-3">
+                        <label class="form-label text-muted small fw-bold">NOME OFICIAL</label>
+                        <input type="text" name="name" class="form-control form-control-modern" required
+                            placeholder="Ex: 1º Ofício de Notas">
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="form-label text-muted small fw-bold">SLUG (IDENTIFICADOR)</label>
+                        <input type="text" name="slug" class="form-control form-control-modern" required
+                            placeholder="Ex: cartorio_1">
+                        <small class="text-muted" style="font-size: 0.8rem;">Apenas letras minúsculas e _</small>
+                    </div>
+
+                    <button type="submit" class="btn btn-premium w-100">
+                        <i class="bi bi-rocket-takeoff me-2"></i>Criar Cartório
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- List Column -->
+        <div class="col-lg-8">
+            <div class="glass-card p-4">
+                <div class="d-flex align-items-center justify-content-between mb-4">
+                    <h5 class="fw-bold text-dark mb-0">Cartórios Ativos</h5>
+                    <span class="badge bg-light text-dark border">{{ tenants|length }} Registrados</span>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="table table-modern align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th class="ps-3">Cartório</th>
+                                <th>Schema / ID</th>
+                                <th>Data Criação</th>
+                                <th class="text-end">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for t in tenants %}
+                            <tr>
+                                <td class="ps-3">
+                                    <div class="d-flex align-items-center">
+                                        <div class="tenant-badge">
+                                            <i class="bi bi-building"></i>
+                                        </div>
+                                        <div>
+                                            <div class="fw-bold">{{ t.name }}</div>
+                                            <div class="small text-muted text-monospace">{{ t.slug }}</div>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td>
+                                    <div class="d-flex flex-column">
+                                        <span class="badge bg-light text-secondary border mb-1"
+                                            style="width: fit-content;">{{ t.schema_name }}</span>
+                                        <span class="small text-muted">ID: {{ t.id }}</span>
+                                    </div>
+                                </td>
+                                <td>
+                                    <span class="text-secondary small">
+                                        <i class="bi bi-calendar3 me-1"></i>
+                                        {{ (t.created_at|string)[:10] if t.created_at else 'N/A' }}
+                                    </span>
+                                </td>
+                                <td class="text-end">
+                                    <span
+                                        class="badge bg-success-subtle text-success border border-success-subtle rounded-pill px-3">
+                                        Ativo
+                                    </span>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                    {% if not tenants %}
+                    <div class="text-center py-5">
+                        <i class="bi bi-inbox fs-1 text-muted opacity-25"></i>
+                        <p class="text-muted mt-2">Nenhum cartório encontrado.</p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -42,6 +42,16 @@
                 </li>
                 {% endif %}
 
+                {% if current_user.role == 'admin' %}
+                <li class="nav-item">
+                    <a href="{{ url_for('admin_tenants') }}"
+                        class="nav-link text-white {{ 'active' if request.endpoint == 'admin_tenants' }}">
+                        <i class="bi bi-bank me-1"></i>
+                        Cartórios
+                    </a>
+                </li>
+                {% endif %}
+
                 <li>
                     <a href="{{ url_for('importar_arquivo') }}"
                         class="nav-link text-white {{ 'active' if request.endpoint == 'importar_arquivo' }}">
@@ -115,7 +125,12 @@
                     {% if current_user.is_authenticated %}
                     <div class="text-end me-2 d-none d-sm-block">
                         <div class="fw-bold text-dark small">{{ current_user.username }}</div>
-                        <div class="text-muted text-uppercase" style="font-size: 0.65rem;">{{ current_user.role }}</div>
+                        <div class="text-muted text-uppercase" style="font-size: 0.65rem;">
+                            {{ current_user.role }}
+                            {% if session.get('cartorio_name') %}
+                            &bull; {{ session.get('cartorio_name') }}
+                            {% endif %}
+                        </div>
                     </div>
                     <div class="user-avatar dropdown position-relative">
                         <a href="#" class="d-flex align-items-center text-decoration-none dropdown-toggle"
@@ -143,6 +158,13 @@
                                     Meu Perfil
                                 </a>
                             </li>
+                            {% if session.get('multi_tenant') %}
+                            <li>
+                                <a class="dropdown-item text-primary" href="{{ url_for('select_cartorio') }}">
+                                    <i class="bi bi-arrow-repeat me-2"></i>Trocar Cartório
+                                </a>
+                            </li>
+                            {% endif %}
                             {% if current_user.role == 'admin' %}
                             <li>
                                 <hr class="dropdown-divider">

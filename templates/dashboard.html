@@ -1,38 +1,217 @@
 {% extends "base.html" %}
 
 {% block conteudo %}
-<h2 class="fw-bold text-secondary mb-4">Dashboard</h2>
+<div class="container-fluid py-4">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2 class="fw-bold mb-0">Dashboard Operacional</h2>
+            <p class="text-muted small mb-0">Visão geral do desempenho do cartório.</p>
+        </div>
+        <div class="d-flex gap-2">
+            <a href="{{ url_for('dashboard_relatorio') }}" class="btn btn-light border btn-sm"><i
+                    class="bi bi-download me-1"></i>Relatório PDF</a>
+        </div>
+    </div>
 
-<div class="row g-4 mb-4">
-    <div class="col-md-4">
-        <div class="card shadow-sm border-start border-primary border-4">
-            <div class="card-body">
-                <div class="text-muted small text-uppercase fw-bold">Total Matrículas</div>
-                <div class="display-5 fw-bold text-dark">{{ total }}</div>
+    <!-- KPI Cards -->
+    <div class="row g-3 mb-4">
+        <div class="col-md-4">
+            <div class="card border-0 shadow-sm h-100"
+                style="background: linear-gradient(135deg, #0d6efd, #0a58ca); color: white;">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <div class="text-white-50 small text-uppercase fw-bold mb-1">Total Matrículas</div>
+                            <h2 class="display-5 fw-bold mb-0">{{ total }}</h2>
+                        </div>
+                        <i class="bi bi-folder2-open fs-1 text-white-50"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card border-0 shadow-sm h-100 bg-white">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <div class="text-success small text-uppercase fw-bold mb-1">Concluídas</div>
+                            <h2 class="display-5 fw-bold mb-0 text-dark">{{ concluidos }}</h2>
+                        </div>
+                        <div class="bg-success bg-opacity-10 p-3 rounded-circle">
+                            <i class="bi bi-check-lg fs-3 text-success"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card border-0 shadow-sm h-100 bg-white">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <div class="text-warning small text-uppercase fw-bold mb-1">Pendentes</div>
+                            <h2 class="display-5 fw-bold mb-0 text-dark">{{ pendentes }}</h2>
+                        </div>
+                        <div class="bg-warning bg-opacity-10 p-3 rounded-circle">
+                            <i class="bi bi-clock-history fs-3 text-warning"></i>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
-    <div class="col-md-4">
-        <div class="card shadow-sm border-start border-success border-4">
-            <div class="card-body">
-                <div class="text-muted small text-uppercase fw-bold">Concluídas</div>
-                <div class="display-5 fw-bold text-success">{{ concluidos }}</div>
+
+    <div class="row g-4 mb-4">
+        <!-- Chart Section -->
+        <div class="col-lg-8">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-white border-0 py-3">
+                    <h5 class="fw-bold mb-0"><i class="bi bi-graph-up me-2 text-primary"></i>Produtividade (Últimos 7
+                        dias)</h5>
+                </div>
+                <div class="card-body">
+                    <canvas id="productivityChart" height="250"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Top Users Section -->
+        <div class="col-lg-4">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-white border-0 py-3">
+                    <h5 class="fw-bold mb-0"><i class="bi bi-trophy me-2 text-warning"></i>Ranking de Usuários</h5>
+                </div>
+                <div class="card-body p-0">
+                    <div class="list-group list-group-flush">
+                        {% if top_performers %}
+                        {% for user in top_performers %}
+                        <div
+                            class="list-group-item d-flex justify-content-between align-items-center px-4 py-3 border-0">
+                            <div class="d-flex align-items-center">
+                                <div class="bg-light rounded-circle d-flex align-items-center justify-content-center me-3 fw-bold text-primary border"
+                                    style="width: 40px; height: 40px;">
+                                    {{ loop.index }}
+                                </div>
+                                <div>
+                                    <div class="fw-bold text-dark">{{ user.name }}</div>
+                                    <div class="small text-muted">Colaborador</div>
+                                </div>
+                            </div>
+                            <span class="badge bg-primary rounded-pill px-3">{{ user.count }} conc.</span>
+                        </div>
+                        {% endfor %}
+                        {% else %}
+                        <div class="text-center py-4 text-muted">
+                            <i class="bi bi-inbox fs-1 d-block mb-2"></i>
+                            Nenhum dado de produtividade ainda.
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
             </div>
         </div>
     </div>
-    <div class="col-md-4">
-        <div class="card shadow-sm border-start border-warning border-4">
-            <div class="card-body">
-                <div class="text-muted small text-uppercase fw-bold">Pendentes</div>
-                <div class="display-5 fw-bold text-warning">{{ pendentes }}</div>
+
+    <!-- New Charts Row -->
+    <div class="row g-4">
+        <div class="col-md-6">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-white border-0 py-3">
+                    <h5 class="fw-bold mb-0"><i class="bi bi-house-door me-2 text-info"></i>Tipos de Imóvel</h5>
+                </div>
+                <div class="card-body">
+                    <div style="height: 250px;">
+                        <canvas id="typeChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-white border-0 py-3">
+                    <h5 class="fw-bold mb-0"><i class="bi bi-journal-bookmark me-2 text-success"></i>Tipos de Registro
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div style="height: 250px;">
+                        <canvas id="regChart"></canvas>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
 </div>
 
-<div class="alert alert-light border shadow-sm">
-    <h5 class="alert-heading"><i class="bi bi-bar-chart-fill"></i> Estatísticas Avançadas</h5>
-    <p class="mb-0">Funcionalidade de métricas de desempenho detalhadas será implementada em atualizações futuras,
-        utilizando logs de auditoria.</p>
-</div>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    // Productivity Chart
+    const ctxProd = document.getElementById('productivityChart').getContext('2d');
+    new Chart(ctxProd, {
+        type: 'line',
+        data: {
+            labels: {{ chart_labels| safe }},
+        datasets: [{
+            label: 'Imóveis Concluídos',
+            data: {{ chart_data| safe }},
+        backgroundColor: 'rgba(13, 110, 253, 0.2)',
+        borderColor: 'rgba(13, 110, 253, 1)',
+        borderWidth: 2,
+        tension: 0.4,
+        fill: true
+            }]
+        },
+        options: {
+        plugins: { legend: { display: false } },
+        scales: { y: { beginAtZero: true, grid: { borderDash: [5, 5] } }, x: { grid: { display: false } } },
+        responsive: true,
+        maintainAspectRatio: false
+    }
+    });
+
+    // Property Type Chart
+    const ctxType = document.getElementById('typeChart').getContext('2d');
+    new Chart(ctxType, {
+        type: 'doughnut',
+        data: {
+            labels: {{ type_labels| safe }},
+        datasets: [{
+            data: {{ type_counts| safe }},
+        backgroundColor: [
+            '#0d6efd', '#6610f2', '#6f42c1', '#d63384', '#dc3545',
+            '#fd7e14', '#ffc107', '#198754', '#20c997', '#0dcaf0'
+        ],
+        borderWidth: 0
+            }]
+        },
+        options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: { position: 'right' }
+        }
+    }
+    });
+
+    // Registry Type Chart
+    const ctxReg = document.getElementById('regChart').getContext('2d');
+    new Chart(ctxReg, {
+        type: 'pie',
+        data: {
+            labels: {{ reg_labels| safe }},
+        datasets: [{
+            data: {{ reg_counts| safe }},
+        backgroundColor: ['#198754', '#ffc107', '#0dcaf0'],
+        borderWidth: 0
+            }]
+        },
+        options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: { position: 'right' }
+        }
+    }
+    });
+</script>
 {% endblock %}

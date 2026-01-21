@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Selecionar Cartório - IAGO</title>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary-color: #2563eb;
+            --primary-hover: #1d4ed8;
+            --bg-color: #f3f4f6;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .card {
+            border: none;
+            border-radius: 16px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            width: 100%;
+            max-width: 400px;
+        }
+
+        .card-header {
+            background-color: white;
+            border-bottom: 1px solid #e5e7eb;
+            padding: 1.5rem 1.5rem 0.5rem;
+            border-radius: 16px 16px 0 0 !important;
+        }
+
+        .cartorio-option {
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+
+        .cartorio-option:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            border-color: var(--primary-color) !important;
+        }
+
+        .btn-check:checked+.cartorio-option {
+            background-color: #eff6ff;
+            border-color: var(--primary-color) !important;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container p-4">
+        <div class="card mx-auto">
+            <div class="card-header text-center">
+                <h4 class="fw-bold mb-1">Selecione o Cartório</h4>
+                <p class="text-muted small">Escolha o ambiente de trabalho</p>
+            </div>
+            <div class="card-body p-4">
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                {% for category, message in messages %}
+                <div class="alert alert-{{ category }} py-2 small">{{ message }}</div>
+                {% endfor %}
+                {% endif %}
+                {% endwith %}
+
+                <form method="POST">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="d-grid gap-3 mb-4">
+                        {% for t in tenants %}
+                        <div>
+                            <input type="radio" class="btn-check" name="cartorio_slug" id="t_{{ t.slug }}"
+                                value="{{ t.slug }}" required checked>
+                            <label
+                                class="btn btn-outline-secondary w-100 py-3 text-start px-4 border rounded-3 cartorio-option d-flex align-items-center"
+                                for="t_{{ t.slug }}">
+                                <span
+                                    class="bg-primary text-white rounded-circle d-flex align-items-center justify-content-center me-3"
+                                    style="width: 32px; height: 32px;">
+                                    {{ t.name[0] }}
+                                </span>
+                                <div>
+                                    <div class="fw-semibold text-dark">{{ t.name }}</div>
+                                    <div class="small text-muted" style="font-size: 0.8rem;">Acesso Autorizado</div>
+                                </div>
+                            </label>
+                        </div>
+                        {% endfor %}
+                    </div>
+
+                    <button type="submit" class="btn btn-primary w-100 py-2 fw-medium">
+                        Entrar no Sistema
+                    </button>
+                    <div class="text-center mt-3">
+                        <a href="{{ url_for('logout') }}" class="text-muted text-decoration-none small">Sair / Trocar
+                            Usuário</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</body>
+
+</html>

@@ -1,107 +1,101 @@
 {% extends "base.html" %}
 
 {% block conteudo %}
-<div class="d-flex justify-content-between align-items-center mb-4">
-    <h2 class="fw-bold text-secondary">Gerenciar Usuários</h2>
-</div>
-
-<div class="row">
-    <!-- Form Criar Usuário -->
-    <div class="col-md-4 mb-4">
-        <div class="card shadow-sm">
-            <div class="card-header bg-white fw-bold">Novo Usuário</div>
-            <div class="card-body">
-                <form method="post">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <div class="mb-3">
-                        <label class="form-label">Nome Completo</label>
-                        <input type="text" class="form-control" name="nome_completo">
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">CPF</label>
-                        <input type="text" class="form-control" name="cpf" placeholder="000.000.000-00" maxlength="14"
-                            oninput="maskCPF(this)">
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Usuário (Login)</label>
-                        <input type="text" class="form-control" name="username" required>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">E-mail</label>
-                        <input type="email" class="form-control" name="email" placeholder="nome@exemplo.com">
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Senha</label>
-                        <input type="password" class="form-control" name="password" required>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">WhatsApp (ex: 5511999999999)</label>
-                        <input type="text" class="form-control" name="whatsapp" placeholder="5511999999999">
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Nível</label>
-                        <select class="form-select" name="role">
-                            <option value="colaborador">Colaborador</option>
-                            <option value="supervisor">Supervisor</option>
-                            {% if current_user.role == 'admin' %}
-                            <option value="admin">Administrador</option>
-                            {% endif %}
-                        </select>
-                    </div>
-                    <button type="submit" class="btn btn-primary w-100">Criar</button>
-                </form>
-            </div>
-        </div>
+<div class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="fw-bold mb-0">Gerenciar Usuários</h2>
+        <a href="{{ url_for('novo_usuario') }}" class="btn btn-primary">
+            <i class="bi bi-person-plus me-2"></i>Novo Usuário
+        </a>
     </div>
 
-    <!-- Lista Usuários -->
-    <div class="col-md-8">
-        <div class="card shadow-sm">
-            <div class="card-body p-0">
-                <table class="table table-hover mb-0">
-                    <thead class="table-light">
+    <!-- Users Table -->
+    <div class="card shadow-sm border-0">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="bg-light">
                         <tr>
-                            <th class="ps-4">ID</th>
-                            <th>Usuário</th>
-                            <th>Nome</th>
-                            <th>CPF</th>
-                            <th>E-mail</th>
+                            <th class="ps-4">Usuário</th>
+                            <th>Contato</th>
                             <th>Nível</th>
+                            <th>Cartórios Vinculados</th> <!-- Only for Admin display logic inside -->
                             <th>Criado em</th>
-                            {% if current_user.role in ['admin', 'supervisor'] %}
                             <th class="text-end pe-4">Ações</th>
-                            {% endif %}
                         </tr>
                     </thead>
                     <tbody>
                         {% for u in users %}
                         <tr>
-                            <td class="ps-4">{{ u[0] }}</td>
-                            <td>{{ u[1] }}</td>
-                            <td>{{ u[5] or '-' }}</td>
-                            <td>{{ u[6] or '-' }}</td>
-                            <td>{{ u[4] or '-' }}</td>
+                            <td class="ps-4">
+                                <div class="d-flex align-items-center">
+                                    <div class="me-3">
+                                        {% if u.profile_image %}
+                                        <img src="{{ url_for('static', filename='uploads/' ~ u.profile_image) }}"
+                                            class="rounded-circle border" width="40" height="40"
+                                            style="object-fit:cover;">
+                                        {% else %}
+                                        <div class="bg-secondary bg-opacity-10 text-secondary rounded-circle d-flex align-items-center justify-content-center"
+                                            style="width: 40px; height: 40px;">
+                                            <span class="fw-bold">{{ u.username[:1]|upper }}</span>
+                                        </div>
+                                        {% endif %}
+                                    </div>
+                                    <div>
+                                        <div class="fw-bold text-dark">{{ u.username }}</div>
+                                        <div class="small text-muted">{{ u.nome_completo or '' }}</div>
+                                        {% if u.cpf %}
+                                        <div class="small text-muted" style="font-size: 0.7rem;">CPF: {{ u.cpf }}</div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </td>
                             <td>
-                                {% if u[2] == 'admin' %} <span class="badge bg-danger">Admin</span>
-                                {% elif u[2] == 'supervisor' %} <span
-                                    class="badge bg-warning text-dark">Supervisor</span>
-                                {% else %} <span class="badge bg-secondary">Colaborador</span>
+                                <div class="d-flex flex-column small">
+                                    <a href="mailto:{{ u.email }}" class="text-dark text-decoration-none">{{ u.email
+                                        }}</a>
+                                    {% if u.whatsapp %}
+                                    <span class="text-muted"><i class="bi bi-whatsapp me-1 text-success"></i>{{
+                                        u.whatsapp }}</span>
+                                    {% endif %}
+                                </div>
+                            </td>
+                            <td>
+                                {% if u.role == 'admin' %}
+                                <span class="badge bg-danger">Admin</span>
+                                {% elif u.role == 'supervisor' %}
+                                <span class="badge bg-warning text-dark">Supervisor</span>
+                                {% else %}
+                                <span class="badge bg-secondary">Colaborador</span>
                                 {% endif %}
                             </td>
-                            <td>{{ u[3][:10] if u[3] else '-' }}</td>
-                            {% if current_user.role in ['admin', 'supervisor'] %}
-                            <td class="text-end pe-4">
-                                <form action="{{ url_for('excluir_usuario', user_id=u[0]) }}" method="post"
-                                    class="d-inline-block" onsubmit="return confirm('Excluir este usuário?');">
-                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                    <a href="{{ url_for('editar_usuario', user_id=u[0]) }}"
-                                        class="btn btn-sm btn-outline-primary me-1">Editar</a>
-                                    {% if current_user.role == 'admin' %}
-                                    <button class="btn btn-sm btn-outline-danger" type="submit">Excluir</button>
-                                    {% endif %}
-                                </form>
+                            <td>
+                                {% if u.assigned_tenants %}
+                                {% set t_list = u.assigned_tenants.split(',') %}
+                                <div class="d-flex flex-wrap gap-1">
+                                    {% for t in t_list %}
+                                    <span
+                                        class="badge bg-info bg-opacity-10 text-info border border-info border-opacity-25">{{
+                                        t.strip() }}</span>
+                                    {% endfor %}
+                                </div>
+                                {% else %}
+                                <span class="text-muted small">-</span>
+                                {% endif %}
                             </td>
-                            {% endif %}
+                            <td>
+                                <span class="text-muted small">
+                                    {{ (u.created_at|string)[:10] if u.created_at else '-' }}
+                                </span>
+                            </td>
+                            <td class="text-end pe-4">
+                                <div class="btn-group">
+                                    <a href="{{ url_for('editar_usuario', user_id=u.id) }}"
+                                        class="btn btn-sm btn-outline-primary" title="Editar">
+                                        <i class="bi bi-pencil"></i>
+                                    </a>
+                                </div>
+                            </td>
                         </tr>
                         {% endfor %}
                     </tbody>
@@ -110,21 +104,4 @@
         </div>
     </div>
 </div>
-</div>
-
-<script>
-    function maskCPF(input) {
-        let value = input.value.replace(/\D/g, "");
-        if (value.length > 11) value = value.slice(0, 11);
-
-        if (value.length > 9) {
-            value = value.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
-        } else if (value.length > 6) {
-            value = value.replace(/(\d{3})(\d{3})(\d{1,3})/, "$1.$2.$3");
-        } else if (value.length > 3) {
-            value = value.replace(/(\d{3})(\d{1,3})/, "$1.$2");
-        }
-        input.value = value;
-    }
-</script>
 {% endblock %}

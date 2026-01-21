@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+
+{% block conteudo %}
+<div class="container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <div class="card shadow-sm">
+                <div class="card-header bg-primary text-white">
+                    <h4 class="mb-0"><i class="bi bi-person-plus me-2"></i>Novo Usuário</h4>
+                </div>
+                <div class="card-body">
+                    <form method="post" id="createUserForm">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label">Nome Completo</label>
+                                <input type="text" name="nome_completo" class="form-control" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">CPF</label>
+                                <input type="text" name="cpf" class="form-control" placeholder="000.000.000-00">
+                            </div>
+                        </div>
+
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label">Usuário (Login)</label>
+                                <input type="text" name="username" class="form-control" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">E-mail</label>
+                                <input type="email" name="email" class="form-control" required>
+                            </div>
+                        </div>
+
+                        <!-- Password Generator -->
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label">Senha Inicial</label>
+                                <div class="input-group">
+                                    <input type="text" name="password" id="passwordField" class="form-control" required
+                                        placeholder="Clique em Gerar ->">
+                                    <button class="btn btn-outline-secondary" type="button"
+                                        onclick="generatePassword()">
+                                        <i class="bi bi-magic me-1"></i>Gerar
+                                    </button>
+                                </div>
+                                <div class="form-text text-muted small">Anote a senha ou envie para o usuário.</div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">WhatsApp</label>
+                                <div class="input-group">
+                                    <span class="input-group-text p-0 border-0 bg-transparent">
+                                        <select class="form-select border-end-0 rounded-0 rounded-start"
+                                            style="width: 100px;" id="ddiSelect">
+                                            <option value="+55">🇧🇷 +55</option>
+                                            <option value="+1">🇺🇸 +1</option>
+                                            <option value="+351">🇵🇹 +351</option>
+                                            <option value="+34">🇪🇸 +34</option>
+                                        </select>
+                                    </span>
+                                    <input type="text" name="whatsapp_number" id="whatsappInput" class="form-control"
+                                        placeholder="(00) 00000-0000">
+                                    <input type="hidden" name="whatsapp" id="whatsappFull">
+                                </div>
+                                <div class="form-text">Selecione o país e digite o número.</div>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Nível de Acesso</label>
+                            <select name="role" class="form-select">
+                                <option value="colaborador">Colaborador</option>
+                                <option value="supervisor">Supervisor</option>
+                                <option value="admin">Administrador</option>
+                            </select>
+                        </div>
+
+                        <!-- Tenant Selection -->
+                        <div class="card bg-light border-light mb-4">
+                            <div class="card-body">
+                                <h6 class="card-title text-secondary"><i class="bi bi-bank me-2"></i>Vincular aos
+                                    Cartórios:</h6>
+                                <div class="row g-3 mt-1">
+                                    {% for tenant in all_tenants %}
+                                    <div class="col-md-6">
+                                        <div class="form-check">
+                                            <!-- Default check current tenant -->
+                                            <input class="form-check-input" type="checkbox" name="assigned_tenants"
+                                                value="{{ tenant.id }}" id="t_{{ tenant.id }}" {% if
+                                                tenant.slug==session.get('cartorio_slug') %}checked{% endif %}>
+                                            <label class="form-check-label" for="t_{{ tenant.id }}">
+                                                {{ tenant.name }}
+                                            </label>
+                                        </div>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="d-flex justify-content-end gap-2">
+                            <a href="{{ url_for('usuarios') }}" class="btn btn-secondary">Cancelar</a>
+                            <button type="submit" class="btn btn-primary" onclick="combinePhone()">Criar
+                                Usuário</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    function generatePassword() {
+        const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$";
+        let password = "";
+        for (let i = 0; i < 12; i++) {
+            password += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        document.getElementById("passwordField").value = password;
+    }
+
+    function combinePhone() {
+        // Joins DDI and Number into the hidden field 'whatsapp'
+        const ddi = document.getElementById("ddiSelect").value;
+        const number = document.getElementById("whatsappInput").value;
+        // Basic clean
+        const cleanNumber = number.replace(/\D/g, '');
+        if (cleanNumber) {
+            document.getElementById("whatsappFull").value = ddi + cleanNumber;
+        } else {
+            document.getElementById("whatsappFull").value = "";
+        }
+    }
+</script>
+{% endblock %}
